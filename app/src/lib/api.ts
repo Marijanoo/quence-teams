@@ -1,4 +1,4 @@
-import type { ActivityItem, Channel, Chat, Meeting, Message, SearchHit, Team, TeamDetail, User } from './types'
+import type { ActivityItem, CallLog, Channel, Chat, Meeting, Message, SearchHit, Team, TeamDetail, User } from './types'
 
 const KEY_TOKEN = 'qt.token'
 const KEY_SERVER = 'qt.server'
@@ -77,11 +77,12 @@ export const api = {
     if (opts.parent) q.set('parent', opts.parent)
     return request<{ messages: Message[]; hasMore: boolean }>('GET', `/api/convos/${convoId}/messages?${q}`)
   },
-  send: (convoId: string, body: string, opts: { parentId?: string; subject?: string; files?: File[] } = {}) => {
+  send: (convoId: string, body: string, opts: { parentId?: string; subject?: string; files?: File[]; replyTo?: string } = {}) => {
     const form = new FormData()
     form.set('body', body)
     if (opts.parentId) form.set('parentId', opts.parentId)
     if (opts.subject) form.set('subject', opts.subject)
+    if (opts.replyTo) form.set('replyTo', opts.replyTo)
     for (const f of opts.files ?? []) form.append('files', f, f.name)
     return request<Message>('POST', `/api/convos/${convoId}/messages`, form)
   },
@@ -98,6 +99,7 @@ export const api = {
   activitySeen: () => request('POST', '/api/activity/seen'),
   search: (q: string) => request<SearchHit[]>('GET', `/api/search?q=${encodeURIComponent(q)}`),
 
+  callHistory: () => request<CallLog[]>('GET', '/api/calls'),
   meetings: (from: number, to: number) => request<Meeting[]>('GET', `/api/meetings?from=${from}&to=${to}`),
   createMeeting: (m: { title: string; description?: string; startsAt: number; endsAt: number; attendeeIds: string[]; convoId?: string | null }) =>
     request<Meeting>('POST', '/api/meetings', m),

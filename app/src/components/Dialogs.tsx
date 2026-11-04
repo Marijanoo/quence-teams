@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react'
 import { Crown, LogOut, Trash2, UserMinus, UserPlus } from 'lucide-react'
 import { api } from '../lib/api'
-import { chatTitle, useStore } from '../lib/store'
+import { askConfirm, chatTitle, useStore } from '../lib/store'
 import type { Meeting, Team, TeamDetail } from '../lib/types'
 import { Avatar, Dialog, PeoplePicker, presenceLabel } from './ui'
 import { formatTime } from '../lib/format'
@@ -147,7 +147,7 @@ export function TeamSettingsDialog({ teamId, onClose }: { teamId: string; onClos
                 <button className="btn sm ghost" disabled={busy} onClick={() => act(() => api.setTeamRole(teamId, m.id, m.role === 'owner' ? 'member' : 'owner'))}>
                   {m.role === 'owner' ? 'Make member' : 'Make owner'}
                 </button>
-                <button className="icon-btn" title="Remove from team" disabled={busy} onClick={() => { if (confirm(`Remove ${m.name} from ${detail.name}?`)) void act(() => api.removeTeamMember(teamId, m.id)) }}><UserMinus size={16} /></button>
+                <button className="icon-btn" title="Remove from team" disabled={busy} onClick={async () => { if (await askConfirm({ title: `Remove ${m.name}?`, message: `${m.name} will lose access to ${detail.name} and its channels.`, confirmLabel: 'Remove', danger: true })) void act(() => api.removeTeamMember(teamId, m.id)) }}><UserMinus size={16} /></button>
               </>
             )}
           </div>
@@ -160,10 +160,10 @@ export function TeamSettingsDialog({ teamId, onClose }: { teamId: string; onClos
         </form>
       )}
       <div className="muted" style={{ fontSize: 12 }}>People must have signed in to Quence Teams at least once before you can add them.</div>
-      <div className="actions" style={{ justifyContent: 'space-between' }}>
+      <div className="actions split">
         <div style={{ display: 'flex', gap: 8 }}>
-          <button className="btn danger" onClick={() => { if (confirm(`Leave ${detail.name}?`)) void act(() => api.removeTeamMember(teamId, me.id), onClose) }}><LogOut size={15} /> Leave</button>
-          {owner && <button className="btn danger" onClick={() => { if (confirm(`Delete ${detail.name}, its channels and all messages? This cannot be undone.`)) void act(() => api.deleteTeam(teamId), onClose) }}><Trash2 size={15} /> Delete team</button>}
+          <button className="btn danger" onClick={async () => { if (await askConfirm({ title: `Leave ${detail.name}?`, message: 'You will need to be added again to rejoin.', confirmLabel: 'Leave', danger: true })) void act(() => api.removeTeamMember(teamId, me.id), onClose) }}><LogOut size={15} /> Leave</button>
+          {owner && <button className="btn danger" onClick={async () => { if (await askConfirm({ title: `Delete ${detail.name}?`, message: 'The team, its channels and all messages and files will be permanently deleted. This cannot be undone.', confirmLabel: 'Delete team', danger: true })) void act(() => api.deleteTeam(teamId), onClose) }}><Trash2 size={15} /> Delete team</button>}
         </div>
         <button className="btn" onClick={onClose}>Done</button>
       </div>
@@ -194,8 +194,8 @@ export function ChatMembersDialog({ chatId, onClose }: { chatId: string; onClose
       </div>
       <div className="section-label" style={{ padding: 0 }}>Add people</div>
       <PeoplePicker selected={picked} onChange={setPicked} exclude={chat.members.map(m => m.id)} />
-      <div className="actions" style={{ justifyContent: 'space-between' }}>
-        <button className="btn danger" onClick={() => { if (confirm('Leave this chat?')) void run(async () => { await api.leaveChat(chatId); await select(null); onClose() }) }}><LogOut size={15} /> Leave chat</button>
+      <div className="actions split">
+        <button className="btn danger" onClick={async () => { if (await askConfirm({ title: 'Leave this chat?', message: 'You will stop receiving messages from it.', confirmLabel: 'Leave', danger: true })) void run(async () => { await api.leaveChat(chatId); await select(null); onClose() }) }}><LogOut size={15} /> Leave chat</button>
         <div style={{ display: 'flex', gap: 8 }}>
           <button className="btn" onClick={onClose}>Close</button>
           <button className="btn primary" disabled={!picked.length || busy} onClick={() => run(async () => { for (const id of picked) await api.addChatMember(chatId, id); setPicked([]) })}>Add</button>
@@ -241,7 +241,7 @@ export function ProfileDialog({ onClose }: { onClose: () => void }) {
       <label className="field">Job title
         <input className="input" value={title} maxLength={80} onChange={e => setTitle(e.target.value)} />
       </label>
-      <div className="actions" style={{ justifyContent: 'space-between' }}>
+      <div className="actions split">
         <button className="btn danger" onClick={() => { onClose(); signOut() }}><LogOut size={15} /> Sign out</button>
         <div style={{ display: 'flex', gap: 8 }}>
           <button className="btn" onClick={onClose}>Cancel</button>
@@ -325,7 +325,7 @@ export function MeetingDialog({ meeting, onClose }: { meeting: Meeting; onClose:
         ))}
       </div>
       <div className="actions" style={{ flexWrap: 'wrap' }}>
-        {isOrganizer && <button className="btn danger" onClick={() => { if (confirm('Cancel this meeting for everyone?')) void api.deleteMeeting(meeting.id).then(() => { useStore.setState(s => ({ meetings: s.meetings.filter(m => m.id !== meeting.id) })); onClose() }).catch(e => toast(e.message, 'error')) }}>Cancel meeting</button>}
+        {isOrganizer && <button className="btn danger" onClick={async () => { if (await askConfirm({ title: 'Cancel this meeting?', message: 'It will be removed from everyone\'s calendar.', confirmLabel: 'Cancel meeting', danger: true })) void api.deleteMeeting(meeting.id).then(() => { useStore.setState(s => ({ meetings: s.meetings.filter(m => m.id !== meeting.id) })); onClose() }).catch(e => toast(e.message, 'error')) }}>Cancel meeting</button>}
         {mine && !isOrganizer && (
           <>
             <button className="btn" onClick={() => respond('declined')}>Decline</button>

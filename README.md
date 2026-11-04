@@ -76,6 +76,13 @@ location / {
 - **Permissions:** private channels and chats are only visible to their members, files are checked
   against conversation membership on every download, and team owners manage members and channels.
 
+## Desktop app notes
+
+- Frameless window with the same custom title bar and window buttons as the other Quence apps.
+- **Zoom:** `Ctrl` + `+` / `Ctrl` + `-` / `Ctrl` + `0` (also `Ctrl` + mouse wheel). The level is remembered.
+- In chats, **Reply** quotes the message (like Teams); in channels it opens a thread.
+- The **Calls** tab on the left shows call history (incoming, outgoing, missed) with call back.
+
 ## Not included
 
 Compared with the real Microsoft Teams: no external/guest access, no meeting recordings or live

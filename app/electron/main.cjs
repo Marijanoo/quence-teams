@@ -11,7 +11,7 @@ function loadState() {
 }
 function saveState(win) {
   if (win.isMinimized() || win.isFullScreen()) return
-  try { fs.writeFileSync(stateFile, JSON.stringify({ ...win.getNormalBounds(), maximized: win.isMaximized() })) } catch { /* not critical */ }
+  try { fs.writeFileSync(stateFile, JSON.stringify({ ...win.getNormalBounds(), maximized: win.isMaximized(), zoom: win.webContents.getZoomLevel() })) } catch { /* not critical */ }
 }
 
 const devUrl = process.env.TEAMS_DEV_URL // e.g. http://localhost:5180 while running `vite`
@@ -24,6 +24,7 @@ function createWindow() {
     minWidth: 380, minHeight: 520,
     backgroundColor: '#2b2a31',
     title: 'Quence Teams',
+    frame: false, // custom title bar with our own window controls (same as the other Quence apps)
     autoHideMenuBar: true,
     show: false,
     webPreferences: {
@@ -35,6 +36,24 @@ function createWindow() {
     }
   })
   if (st.maximized) win.maximize()
+
+  // Zoom: Ctrl/Cmd + "+", Ctrl/Cmd + "-", Ctrl/Cmd + 0 (the default menu that provides these is removed).
+  const ZOOM_MIN = -3, ZOOM_MAX = 5, STEP = 0.5
+  const setZoom = level => {
+    const next = Math.min(ZOOM_MAX, Math.max(ZOOM_MIN, Math.round(level * 2) / 2))
+    win.webContents.setZoomLevel(next)
+    saveState(win)
+  }
+  win.webContents.on('before-input-event', (event, input) => {
+    if (input.type !== 'keyDown' || !(input.control || input.meta) || input.alt) return
+    const wc = win.webContents
+    if (input.key === '=' || input.key === '+') { event.preventDefault(); setZoom(wc.getZoomLevel() + STEP) }
+    else if (input.key === '-' || input.key === '_') { event.preventDefault(); setZoom(wc.getZoomLevel() - STEP) }
+    else if (input.key === '0') { event.preventDefault(); setZoom(0) }
+  })
+  // Ctrl + mouse wheel zooms too.
+  win.webContents.on('zoom-changed', (_e, direction) => setZoom(win.webContents.getZoomLevel() + (direction === 'in' ? STEP : -STEP)))
+  win.webContents.on('did-finish-load', () => { if (typeof st.zoom === 'number') win.webContents.setZoomLevel(st.zoom) })
   win.once('ready-to-show', () => win.show())
   win.on('close', () => saveState(win))
   win.on('focus', () => win.flashFrame(false))
@@ -77,6 +96,15 @@ if (!app.requestSingleInstanceLock()) {
         .then(sources => cb(sources.length ? { video: sources[0] } : {}))
         .catch(() => cb({}))
     }, { useSystemPicker: true })
+
+    // Window controls for the custom title bar.
+    ipcMain.on('window-minimize', e => BrowserWindow.fromWebContents(e.sender)?.minimize())
+    ipcMain.on('window-maximize', e => {
+      const w = BrowserWindow.fromWebContents(e.sender)
+      if (!w) return
+      if (w.isMaximized()) w.unmaximize(); else w.maximize()
+    })
+    ipcMain.on('window-close', e => BrowserWindow.fromWebContents(e.sender)?.close())
 
     ipcMain.on('unread', (_e, n) => {
       const count = Number.isFinite(n) ? Math.max(0, Math.floor(n)) : 0

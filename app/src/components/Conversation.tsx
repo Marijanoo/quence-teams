@@ -2,7 +2,7 @@ import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } fr
 import { ArrowLeft, FileText, Hash, Lock, Phone, Settings, Users, Video } from 'lucide-react'
 import { api, fileUrl } from '../lib/api'
 import { formatBytes, formatDay, formatShort, sameDay } from '../lib/format'
-import { chatTitle, useStore } from '../lib/store'
+import { askConfirm, chatTitle, useStore } from '../lib/store'
 import { socket } from '../lib/socket'
 import type { Message, TeamDetail, User } from '../lib/types'
 import { Composer } from './Composer'
@@ -29,12 +29,13 @@ export function Conversation({ onBack, onTeamSettings, onChatMembers }: { onBack
   const [teamDetail, setTeamDetail] = useState<TeamDetail | null>(null)
   const [lightbox, setLightbox] = useState<string | null>(null)
   const [highlight, setHighlight] = useState<string | null>(null)
+  const [quote, setQuote] = useState<Message | null>(null)
 
   const team = selection.kind === 'channel' ? teams.find(t => t.id === selection.teamId) : undefined
   const channel = team?.channels.find(c => c.id === selection.convoId)
   const chat = selection.kind === 'chat' ? chats.find(c => c.id === selection.convoId) : undefined
 
-  useEffect(() => { setTab('posts') }, [selection.convoId])
+  useEffect(() => { setTab('posts'); setQuote(null) }, [selection.convoId])
 
   useEffect(() => {
     setTeamDetail(null)
@@ -127,7 +128,7 @@ export function Conversation({ onBack, onTeamSettings, onChatMembers }: { onBack
               items={[
                 { label: 'Manage team', icon: <Users size={15} />, onClick: () => onTeamSettings(team.id) },
                 { label: 'Delete channel', danger: true, hidden: !isOwner || team.channels[0]?.id === channel?.id,
-                  onClick: async () => { if (channel && confirm(`Delete #${channel.name} and all its messages?`)) await api.deleteChannel(channel.id).catch(e => toast(e.message, 'error')) } }
+                  onClick: async () => { if (channel && await askConfirm({ title: `Delete #${channel.name}?`, message: 'All messages and files in this channel will be permanently deleted.', confirmLabel: 'Delete channel', danger: true })) await api.deleteChannel(channel.id).catch(e => toast(e.message, 'error')) } }
               ]} />
           )}
         </div>
@@ -159,14 +160,14 @@ export function Conversation({ onBack, onTeamSettings, onChatMembers }: { onBack
               return (
                 <div key={m.id} className={highlight === m.id ? 'highlight' : ''}>
                   {newDay && <div className="day-divider">{formatDay(m.createdAt)}</div>}
-                  <MessageItem msg={m} compact={compact} canModerate={isOwner} onReply={msg => openThread(msg.id)} onImage={setLightbox} />
+                  <MessageItem msg={m} compact={compact} canModerate={isOwner} onReply={msg => openThread(msg.id)} onQuote={selection.kind === 'chat' ? setQuote : undefined} onImage={setLightbox} />
                 </div>
               )
             })}
           </div>
           <div className="typing" aria-live="polite">{typingText}</div>
           <Composer convoId={selection.convoId} placeholder={selection.kind === 'channel' ? `Start a new post in #${title}` : 'Type a message'}
-            allowSubject={selection.kind === 'channel'} members={members} />
+            allowSubject={selection.kind === 'channel'} members={members} quote={quote} onClearQuote={() => setQuote(null)} />
         </>
       )}
 

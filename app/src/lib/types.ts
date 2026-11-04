@@ -1,11 +1,13 @@
 export type Presence = 'available' | 'busy' | 'dnd' | 'away' | 'offline'
 
 export interface User { id: string; name: string; email: string; title: string; statusMsg: string; color: number }
+export interface Quote { id: string; convoId: string; author: User | null; snippet: string; deleted: boolean; hasAttachment: boolean }
 export interface Reaction { emoji: string; userIds: string[] }
 export interface Attachment { id: string; name: string; mime: string; size: number }
 
 export interface Message {
   id: string; seq: number; convoId: string; parentId: string | null
+  replyTo: Quote | null
   kind: 'text' | 'call'; subject: string; author: User | null; body: string
   createdAt: number; editedAt: number | null; deleted: boolean; pinned: boolean
   reactions: Reaction[]; attachments: Attachment[]; replyCount: number; lastReplyAt: number | null
@@ -37,5 +39,11 @@ export interface ActivityItem {
 
 export interface SearchHit { message: Message; where: string; kind: 'channel' | 'chat' }
 
-export type View = 'activity' | 'chat' | 'teams' | 'calendar'
+export interface CallLog {
+  id: string; room: string; kind: 'direct' | 'group' | 'channel' | 'meeting'; title: string
+  startedAt: number; endedAt: number | null; startedBy: User | null
+  status: 'joined' | 'missed' | 'declined'; participants: User[]; canCallBack: boolean
+}
+
+export type View = 'activity' | 'chat' | 'teams' | 'calendar' | 'calls'
 export type Selection = { convoId: string; kind: 'channel' | 'chat'; teamId?: string }

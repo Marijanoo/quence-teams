@@ -37,12 +37,12 @@ export function Dialog({ title, onClose, children, wide }: { title: string; onCl
   }, [onClose])
   return (
     <div className="overlay" onMouseDown={e => { if (e.target === e.currentTarget) onClose() }}>
-      <div className="dialog" role="dialog" aria-modal aria-label={title} style={wide ? { maxWidth: 560 } : undefined}>
-        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+      <div className="dialog" role="dialog" aria-modal aria-label={title} style={wide ? { maxWidth: 580 } : undefined}>
+        <div className="dialog-head">
           <h3>{title}</h3>
           <button className="icon-btn" onClick={onClose} aria-label="Close"><X size={18} /></button>
         </div>
-        {children}
+        <div className="dialog-body">{children}</div>
       </div>
     </div>
   )
@@ -95,7 +95,7 @@ export function PeoplePicker({ selected, onChange, exclude = [], single = false 
       {selected.length > 0 && !single && (
         <div className="tags">
           {selected.map(id => (
-            <span className="chip" key={id}><span>{users[id]?.name}</span>
+            <span className="chip" key={id}><Avatar user={users[id]} size={20} /><span>{users[id]?.name}</span>
               <button className="icon-btn" style={{ width: 20, height: 20 }} onClick={() => toggle(id)} aria-label={`Remove ${users[id]?.name}`}><X size={12} /></button>
             </span>
           ))}
@@ -115,5 +115,21 @@ export function PeoplePicker({ selected, onChange, exclude = [], single = false 
         {!list.length && <div className="empty" style={{ padding: 18 }}>No one found. People appear here after they sign in to Teams once.</div>}
       </div>
     </div>
+  )
+}
+
+// ---- themed replacement for window.confirm() ----
+export function ConfirmHost() {
+  const c = useStore(s => s.confirmState)
+  if (!c) return null
+  const done = (ok: boolean) => { useStore.setState({ confirmState: null }); c.resolve(ok) }
+  return (
+    <Dialog title={c.title} onClose={() => done(false)}>
+      {c.message && <div className="confirm-msg">{c.message}</div>}
+      <div className="actions">
+        <button className="btn" onClick={() => done(false)}>Cancel</button>
+        <button className={`btn ${c.danger ? 'danger' : 'primary'}`} onClick={() => done(true)} autoFocus>{c.confirmLabel}</button>
+      </div>
+    </Dialog>
   )
 }

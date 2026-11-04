@@ -4,5 +4,8 @@ const { contextBridge, ipcRenderer } = require('electron')
 contextBridge.exposeInMainWorld('teamsDesktop', {
   isDesktop: true,
   platform: process.platform,
-  setUnread: n => ipcRenderer.send('unread', n)
+  setUnread: n => ipcRenderer.send('unread', n),
+  minimize: () => ipcRenderer.send('window-minimize'),
+  maximize: () => ipcRenderer.send('window-maximize'),
+  close: () => ipcRenderer.send('window-close')
 })

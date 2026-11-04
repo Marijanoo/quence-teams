@@ -40,6 +40,7 @@ export function Search() {
         <div className="search-results">
           {hits === null && <div className="empty" style={{ padding: 16 }}>Searching…</div>}
           {hits?.length === 0 && <div className="empty" style={{ padding: 16 }}>No messages match “{q}”</div>}
+          {hits && hits.length > 0 && <div className="section-label" style={{ padding: '4px 10px' }}>Messages</div>}
           {hits?.map(h => (
             <div key={h.message.id} className="search-hit" onClick={() => { setOpen(false); setQ(''); void goTo(h.message.convoId, h.message.id, h.message.parentId ?? undefined) }}>
               <div style={{ display: 'flex', justifyContent: 'space-between', gap: 8 }}>

@@ -1,12 +1,13 @@
 import { create } from 'zustand'
 import { api, ApiError, getToken, setToken } from './api'
 import { socket } from './socket'
-import type { Chat, Meeting, Message, Presence, Selection, Team, User, View } from './types'
+import type { CallLog, Chat, Meeting, Message, Presence, Selection, Team, User, View } from './types'
 
 interface ConvoCache { messages: Message[]; hasMore: boolean; loaded: boolean }
 export interface Toast { id: number; text: string; kind?: 'error' | 'info' }
 export interface IncomingCall { room: string; convoId: string; from: User }
 export interface ActiveCall { room: string; title: string }
+export interface ConfirmState { title: string; message?: string; confirmLabel: string; danger?: boolean; resolve: (ok: boolean) => void }
 
 interface State {
   me: User | null
@@ -17,6 +18,7 @@ interface State {
   chats: Chat[]
   activityUnseen: number
   meetings: Meeting[]
+  callHistory: CallLog[]
   ready: boolean
   online: boolean
 
@@ -32,6 +34,7 @@ interface State {
   incoming: IncomingCall | null
   activeCall: ActiveCall | null
   toasts: Toast[]
+  confirmState: ConfirmState | null
 
   signIn: (token: string, user: User) => Promise<void>
   signOut: () => void
@@ -95,10 +98,10 @@ function bump(s: State, msg: Message, mine: boolean): Partial<State> {
 }
 
 export const useStore = create<State>((set, get) => ({
-  me: null, presencePref: 'available', users: {}, presence: {}, teams: [], chats: [], activityUnseen: 0, meetings: [],
+  me: null, presencePref: 'available', users: {}, presence: {}, teams: [], chats: [], activityUnseen: 0, meetings: [], callHistory: [],
   ready: false, online: false,
   view: 'chat', selection: null, threadId: null, jumpTo: null, convos: {}, threads: {}, typing: {},
-  calls: {}, incoming: null, activeCall: null, toasts: [],
+  calls: {}, incoming: null, activeCall: null, toasts: [], confirmState: null,
 
   async signIn(token, user) {
     setToken(token)
@@ -113,7 +116,7 @@ export const useStore = create<State>((set, get) => ({
     setToken(null)
     set({
       me: null, ready: false, teams: [], chats: [], users: {}, presence: {}, convos: {}, threads: {}, selection: null,
-      threadId: null, jumpTo: null, meetings: [], activeCall: null, incoming: null, typing: {}, calls: {}
+      threadId: null, jumpTo: null, meetings: [], callHistory: [], activeCall: null, incoming: null, typing: {}, calls: {}
     })
   },
 
@@ -297,6 +300,7 @@ function wireSocket() {
     set({ incoming: c })
   })
   socket.on('call.declined', () => {})
+  socket.on('call.history', () => { api.callHistory().then(callHistory => set({ callHistory })).catch(() => {}) })
 
   // Typing indicators expire on their own.
   setInterval(() => {
@@ -350,4 +354,11 @@ export async function restoreSession(): Promise<void> {
     if (e instanceof ApiError && e.status === 401) setToken(null)
     else throw e
   }
+}
+
+// Themed confirmation popup (replaces window.confirm, which looks out of place in the desktop app).
+export function askConfirm(opts: { title: string; message?: string; confirmLabel?: string; danger?: boolean }): Promise<boolean> {
+  return new Promise(resolve => {
+    useStore.setState({ confirmState: { title: opts.title, message: opts.message, confirmLabel: opts.confirmLabel ?? 'Confirm', danger: opts.danger, resolve } })
+  })
 }

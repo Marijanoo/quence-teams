@@ -1,28 +1,31 @@
 import { useEffect, useState } from 'react'
-import { Bell, Calendar as CalendarIcon, MessageSquare, Users, Video, X } from 'lucide-react'
+import { Bell, Calendar as CalendarIcon, MessageSquare, Phone, PhoneOff, Users, X } from 'lucide-react'
 import { api, setUnauthorizedHandler } from './lib/api'
 import { restoreSession, useStore } from './lib/store'
 import { socket } from './lib/socket'
-import type { Meeting, Team, View } from './lib/types'
+import type { CallLog, Meeting, Team, View } from './lib/types'
 import { Login } from './components/Login'
 import { ActivityFeed, CalendarSidebar, ChatList, TeamsTree } from './components/Sidebar'
 import { Conversation, ThreadPanel } from './components/Conversation'
 import { Calendar } from './components/Calendar'
 import { CallView } from './components/CallView'
 import { Search } from './components/Search'
-import { Avatar } from './components/ui'
+import { Avatar, ConfirmHost } from './components/ui'
+import { TitleBar } from './components/TitleBar'
+import { CallDetail, CallsSidebar, NewCallDialog } from './components/CallsPanel'
 import { ChatMembersDialog, MeetingDialog, NewChannelDialog, NewChatDialog, NewMeetingDialog, NewTeamDialog, ProfileDialog, TeamSettingsDialog } from './components/Dialogs'
 
 type DialogState =
   | { type: 'newChat' } | { type: 'newTeam' } | { type: 'newChannel'; team: Team }
   | { type: 'team'; teamId: string } | { type: 'chatMembers'; chatId: string }
-  | { type: 'profile' } | { type: 'newMeeting'; start?: number } | { type: 'meeting'; meeting: Meeting }
+  | { type: 'newCall' } | { type: 'profile' } | { type: 'newMeeting'; start?: number } | { type: 'meeting'; meeting: Meeting }
 
 const RAIL: { id: View; label: string; icon: typeof Bell }[] = [
   { id: 'activity', label: 'Activity', icon: Bell },
   { id: 'chat', label: 'Chat', icon: MessageSquare },
   { id: 'teams', label: 'Teams', icon: Users },
-  { id: 'calendar', label: 'Calendar', icon: CalendarIcon }
+  { id: 'calendar', label: 'Calendar', icon: CalendarIcon },
+  { id: 'calls', label: 'Calls', icon: Phone }
 ]
 
 export default function App() {
@@ -54,6 +57,7 @@ function Shell() {
   const teamsUnread = useStore(s => s.teams.reduce((n, t) => n + t.channels.reduce((m, c) => m + c.mentions, 0), 0))
   const toast = useStore(s => s.toast)
   const [dialog, setDialog] = useState<DialogState | null>(null)
+  const [selectedCall, setSelectedCall] = useState<CallLog | null>(null)
 
   // Upcoming meetings for the sidebar and reminders.
   useEffect(() => {
@@ -96,17 +100,13 @@ function Shell() {
 
   return (
     <div className="shell">
-      <header className="topbar">
-        <div className="brand-small">
-          <div className="brand-mark"><MessageSquare size={15} /></div><span>Quence Teams</span>
-        </div>
+      <TitleBar right={
+        <button className="profile-btn" onClick={() => setDialog({ type: 'profile' })} aria-label="Your profile" title={me.name}>
+          <Avatar user={me} size={20} presence /><span>{me.name}</span>
+        </button>
+      }>
         <Search />
-        <div className="right">
-          <button className="btn ghost sm" onClick={() => setDialog({ type: 'profile' })} aria-label="Your profile" style={{ padding: 3 }}>
-            <Avatar user={me} size={30} presence />
-          </button>
-        </div>
-      </header>
+      </TitleBar>
       {!online && <div className="offline-banner" role="status">Reconnecting…</div>}
       <div className={`body${showConvo ? ' convo-open' : ''}`}>
         <nav className="rail" aria-label="Main">
@@ -122,10 +122,13 @@ function Shell() {
           {view === 'activity' && <ActivityFeed />}
           {view === 'chat' && <ChatList onNewChat={() => setDialog({ type: 'newChat' })} />}
           {view === 'teams' && <TeamsTree onNewTeam={() => setDialog({ type: 'newTeam' })} onNewChannel={team => setDialog({ type: 'newChannel', team })} onManage={team => setDialog({ type: 'team', teamId: team.id })} />}
+          {view === 'calls' && <CallsSidebar selectedId={selectedCall?.id ?? null} onSelect={setSelectedCall} onNewCall={() => setDialog({ type: 'newCall' })} />}
           {view === 'calendar' && <CalendarSidebar onNew={() => setDialog({ type: 'newMeeting' })} onOpen={meeting => setDialog({ type: 'meeting', meeting })} />}
         </aside>
 
-        {view === 'calendar'
+        {view === 'calls'
+          ? <CallDetail call={selectedCall} />
+          : view === 'calendar'
           ? <Calendar onNew={start => setDialog({ type: 'newMeeting', start })} onOpen={meeting => setDialog({ type: 'meeting', meeting })} />
           : showConvo
             ? <Conversation key={selection!.convoId} onBack={() => select(null)} onTeamSettings={teamId => setDialog({ type: 'team', teamId })} onChatMembers={chatId => setDialog({ type: 'chatMembers', chatId })} />
@@ -138,6 +141,7 @@ function Shell() {
         {threadId && showConvo && <ThreadPanel key={threadId} />}
       </div>
 
+      {dialog?.type === 'newCall' && <NewCallDialog onClose={() => setDialog(null)} />}
       {dialog?.type === 'newChat' && <NewChatDialog onClose={() => setDialog(null)} />}
       {dialog?.type === 'newTeam' && <NewTeamDialog onClose={() => setDialog(null)} />}
       {dialog?.type === 'newChannel' && <NewChannelDialog team={dialog.team} onClose={() => setDialog(null)} />}
@@ -149,6 +153,7 @@ function Shell() {
 
       {activeCall && <CallView key={activeCall.room} />}
       <IncomingCall />
+      <ConfirmHost />
       <Toasts />
     </div>
   )
@@ -173,9 +178,9 @@ function IncomingCall() {
   return (
     <div className="incoming" role="alertdialog" aria-label="Incoming call">
       <Avatar user={from} size={44} />
-      <div><div style={{ fontWeight: 700 }}>{from.name}</div><div className="muted">is calling you</div></div>
-      <button className="btn primary" onClick={() => joinCall(incoming.room, from.name)}><Video size={15} /> Answer</button>
-      <button className="btn danger" onClick={() => { socket.send('call.decline', { convoId: incoming.convoId }); dismiss() }}>Decline</button>
+      <div className="who"><b>{from.name}</b><span className="muted">is calling you…</span></div>
+      <button className="round decline" onClick={() => { socket.send('call.decline', { convoId: incoming.convoId }); dismiss() }} aria-label="Decline" title="Decline"><PhoneOff size={18} /></button>
+      <button className="round accept" onClick={() => joinCall(incoming.room, from.name)} aria-label="Answer" title="Answer"><Phone size={18} /></button>
     </div>
   )
 }

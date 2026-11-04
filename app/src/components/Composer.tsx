@@ -1,19 +1,21 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { AtSign, Paperclip, Send, Smile, X, Type } from 'lucide-react'
 import { api } from '../lib/api'
-import { EMOJIS, formatBytes, mentionsToRaw } from '../lib/format'
+import { EMOJIS, formatBytes, mentionsToRaw, plainText } from '../lib/format'
 import { useStore } from '../lib/store'
 import { socket } from '../lib/socket'
-import type { User } from '../lib/types'
+import type { Message, User } from '../lib/types'
 import { Avatar, useClickOutside } from './ui'
 
 const MAX_FILE = 25 * 1024 * 1024
 
-export function Composer({ convoId, parentId, placeholder, allowSubject, onSent, members }: {
+export function Composer({ convoId, parentId, placeholder, allowSubject, onSent, members, quote, onClearQuote }: {
   convoId: string; parentId?: string; placeholder: string; allowSubject?: boolean; onSent?: () => void; members: User[]
+  quote?: Message | null; onClearQuote?: () => void
 }) {
   const me = useStore(s => s.me)!
   const toast = useStore(s => s.toast)
+  const users = useStore(s => s.users)
   const [text, setText] = useState('')
   const [subject, setSubject] = useState('')
   const [showSubject, setShowSubject] = useState(false)
@@ -44,6 +46,8 @@ export function Composer({ convoId, parentId, placeholder, allowSubject, onSent,
     el.style.height = 'auto'
     el.style.height = Math.min(el.scrollHeight, 220) + 'px'
   }, [text])
+
+  useEffect(() => { if (quote) area.current?.focus() }, [quote])
 
   const candidates = useMemo(() => {
     if (!mention) return []
@@ -87,8 +91,9 @@ export function Composer({ convoId, parentId, placeholder, allowSubject, onSent,
     if (sending || (!text.trim() && !files.length)) return
     setSending(true)
     try {
-      await api.send(convoId, mentionsToRaw(text, members), { parentId, subject: showSubject ? subject : undefined, files })
+      await api.send(convoId, mentionsToRaw(text, members), { parentId, subject: showSubject ? subject : undefined, files, replyTo: quote?.id })
       setText(''); setSubject(''); setShowSubject(false); setFiles([])
+      onClearQuote?.()
       onSent?.()
     } catch (e) {
       toast((e as Error).message, 'error')
@@ -112,6 +117,15 @@ export function Composer({ convoId, parentId, placeholder, allowSubject, onSent,
               {c.user ? <Avatar user={c.user} size={24} /> : <AtSign size={18} />}<span>{c.name}</span>
             </button>
           ))}
+        </div>
+      )}
+      {quote && (
+        <div className="reply-bar">
+          <div className="who">
+            <span className="quote-author">Replying to {quote.author?.name ?? 'message'}</span>
+            <span className="quote-text">{plainText(quote.body, users) || (quote.attachments.length ? 'Attachment' : '')}</span>
+          </div>
+          <button className="icon-btn" aria-label="Cancel reply" onClick={onClearQuote}><X size={16} /></button>
         </div>
       )}
       <div className="composer">
