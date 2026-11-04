@@ -31,8 +31,8 @@ Handy variants:
 
 ```bash
 npm run electron:dev      # Electron pointed at a running `npm run dev` (Vite) for hot reload
-npm run dist:win          # Windows installer + portable exe  -> app/release/
-npm run dist:mac          # macOS dmg
+npm run dist:win          # Windows installer (NSIS)  -> app/release/
+npm run dist:mac          # macOS dmg + zip (Apple silicon and Intel)
 npm run dist:linux        # Linux AppImage
 ```
 
@@ -88,3 +88,14 @@ location / {
 
 Compared with the real Microsoft Teams: no external/guest access, no meeting recordings or live
 captions, no mobile app, no end-to-end encryption, and calls are not routed through a media server.
+
+## Releases and auto-update
+
+Installers are built by GitHub Actions (`.github/workflows/build.yml`) when a `v*` tag is pushed, and attached to the
+GitHub release together with the `latest*.yml` update feeds. The installed app checks this repo's latest release on
+start and every 4 hours, downloads new versions in the background and shows **Update ready, restart** in the title bar.
+
+To ship a new version: bump `version` in `app/package.json`, commit, then `git tag vX.Y.Z && git push --tags`.
+
+The builds are unsigned: Windows SmartScreen may warn on first run (More info, Run anyway), and on macOS the first
+launch needs right-click, Open.

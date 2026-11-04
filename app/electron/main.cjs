@@ -72,6 +72,25 @@ function createWindow() {
   else win.loadFile(path.join(__dirname, '..', 'dist', 'index.html'))
 }
 
+// Auto-update from the GitHub releases of this repo (same feed setup as the other Quence apps).
+function startUpdater() {
+  if (!app.isPackaged || devUrl) return
+  const { autoUpdater } = require('electron-updater')
+  const tell = (channel, ...args) => { if (win && !win.isDestroyed()) win.webContents.send(channel, ...args) }
+  autoUpdater.logger = { info: () => {}, warn: console.warn, error: console.error, debug: () => {} }
+  autoUpdater.autoDownload = true
+  autoUpdater.autoInstallOnAppQuit = true
+  autoUpdater.setFeedURL({ provider: 'github', owner: 'Marijanoo', repo: 'quence-teams' })
+  autoUpdater.on('update-available', () => tell('update-available'))
+  autoUpdater.on('download-progress', info => tell('update-progress', info.percent))
+  autoUpdater.on('update-downloaded', info => tell('update-downloaded', info.version))
+  autoUpdater.on('error', err => console.error('[updater]', err?.message ?? err))
+  ipcMain.on('install-update', () => autoUpdater.quitAndInstall(true, true))
+  const check = () => autoUpdater.checkForUpdates().catch(() => {})
+  setTimeout(check, 5000)
+  setInterval(check, 4 * 60 * 60 * 1000)
+}
+
 app.setName('Quence Teams')
 if (!app.requestSingleInstanceLock()) {
   app.quit()
@@ -113,6 +132,7 @@ if (!app.requestSingleInstanceLock()) {
     })
 
     createWindow()
+    startUpdater()
     app.on('activate', () => { if (BrowserWindow.getAllWindows().length === 0) createWindow() })
   })
 
