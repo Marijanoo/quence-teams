@@ -78,7 +78,7 @@ select.input { padding-right: 6px; }
 label.field { display: grid; gap: 6px; font-size: 13px; font-weight: 600; color: var(--fg-muted); }
 
 /* ---------- shell ---------- */
-.shell { height: 100%; display: grid; grid-template-rows: 32px minmax(0, 1fr); }
+.shell { height: 100%; display: grid; grid-template-rows: auto minmax(0, 1fr); }
 .search { position: relative; }
 .search input { padding-left: 30px; height: 24px; font-size: 12.5px; background: var(--bg-deep); border-radius: 4px; }
 .search .search-icon { position: absolute; left: 9px; top: 5px; color: var(--fg-dim); pointer-events: none; }
@@ -388,7 +388,19 @@ label.field { display: grid; gap: 6px; font-size: 13px; font-weight: 600; color:
 .quick-top .muted { font-size: 12px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .quick-text { color: var(--fg-muted); display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; overflow-wrap: anywhere; }
 
-.update-btn { display: inline-flex; align-items: center; gap: 6px; height: 22px; padding: 0 10px; margin-right: 8px; border: 0; border-radius: 4px; background: var(--accent); color: var(--accent-fg); font: inherit; font-size: 12px; font-weight: 600; cursor: pointer; }
-.update-btn:hover { filter: brightness(1.08); }
-.update-progress { margin-right: 10px; font-size: 12px; color: var(--fg-dim); }
 .msg.pending { opacity: .6; }
+
+.top { display: block; }
+.update-bar { display: flex; align-items: center; gap: 8px; height: 28px; padding: 0 16px; background: oklch(0.72 0.19 350 / 0.1); border-bottom: 1px solid oklch(0.72 0.19 350 / 0.2); }
+.update-track { position: relative; flex: 1; height: 4px; border-radius: 999px; background: oklch(0.72 0.19 350 / 0.2); overflow: hidden; }
+.update-fill { position: absolute; inset: 0 auto 0 0; background: var(--accent); border-radius: 999px; overflow: hidden; transition: width .3s; }
+.update-shimmer { position: absolute; top: 0; bottom: 0; width: 33.333%; background: linear-gradient(to right, transparent, rgba(255,255,255,.9) 50%, transparent); animation: update-shimmer 1.2s ease-in-out infinite; }
+@keyframes update-shimmer { 0% { transform: translateX(-100%); } 100% { transform: translateX(400%); } }
+.update-text, .update-primary, .update-later { font-size: 12px; white-space: nowrap; color: var(--accent); }
+.update-actions { display: flex; align-items: center; gap: 8px; }
+.update-primary, .update-later { background: none; border: 0; padding: 0; cursor: pointer; font: inherit; font-size: 12px; transition: color .15s; }
+.update-primary { font-weight: 500; }
+.update-primary:hover { filter: brightness(1.15); }
+.update-later { opacity: .6; }
+.update-later:hover { opacity: 1; }
+.update-dot { color: oklch(0.72 0.19 350 / 0.3); }

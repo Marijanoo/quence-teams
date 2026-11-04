@@ -8,8 +8,8 @@ contextBridge.exposeInMainWorld('teamsDesktop', {
   minimize: () => ipcRenderer.send('window-minimize'),
   maximize: () => ipcRenderer.send('window-maximize'),
   close: () => ipcRenderer.send('window-close'),
-  onUpdateAvailable: cb => ipcRenderer.on('update-available', () => cb()),
-  onUpdateProgress: cb => ipcRenderer.on('update-progress', (_e, percent) => cb(percent)),
-  onUpdateDownloaded: cb => ipcRenderer.on('update-downloaded', (_e, version) => cb(version)),
+  onUpdateAvailable: cb => { ipcRenderer.removeAllListeners('update-available'); ipcRenderer.on('update-available', () => cb()) },
+  onUpdateProgress: cb => { ipcRenderer.removeAllListeners('update-progress'); ipcRenderer.on('update-progress', (_e, percent) => cb(percent)) },
+  onUpdateDownloaded: cb => { ipcRenderer.removeAllListeners('update-downloaded'); ipcRenderer.on('update-downloaded', (_e, version) => cb(version)) },
   installUpdate: () => ipcRenderer.send('install-update')
 })
