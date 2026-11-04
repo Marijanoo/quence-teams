@@ -53,7 +53,7 @@ export function Login() {
         </label>
         {showServer && (
           <label className="field">Server
-            <input className="input" value={server} onChange={e => setServerField(e.target.value)} placeholder="https://teams.example.com or http://localhost:4380" />
+            <input className="input" value={server} onChange={e => setServerField(e.target.value)} placeholder="https://teams.example.com " />
           </label>
         )}
         <button className="btn primary" disabled={busy}>{busy ? 'Please wait…' : mode === 'login' ? 'Sign in' : 'Create account'}</button>

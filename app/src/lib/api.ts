@@ -5,7 +5,7 @@ const KEY_SERVER = 'qt.server'
 
 // On a website the API lives on the same origin. In Electron (file://) the user points the app at a server.
 export function defaultServer(): string {
-  return location.protocol.startsWith('http') ? '' : 'http://localhost:4380'
+  return location.protocol.startsWith('http') ? '' : 'https://teams.kolaj.fun'
 }
 export const getServer = () => (localStorage.getItem(KEY_SERVER) ?? defaultServer()).replace(/\/+$/, '')
 export const setServer = (url: string) => localStorage.setItem(KEY_SERVER, url.trim())
