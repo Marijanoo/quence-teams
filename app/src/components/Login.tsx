@@ -3,6 +3,7 @@ import { Loader2 } from 'lucide-react'
 import { api, defaultServer, getServer, setServer } from '../lib/api'
 import { useStore } from '../lib/store'
 import { TitleBar } from './TitleBar'
+import { BottomBar } from './BottomBar'
 
 // Mirrors the Quence API sign-in screen: title bar on top, centred form, labels above the inputs.
 export function Login() {
@@ -86,6 +87,7 @@ export function Login() {
           )}
         </form>
       </div>
+      <BottomBar />
     </div>
   )
 }

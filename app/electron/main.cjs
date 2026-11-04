@@ -24,6 +24,7 @@ function createWindow() {
     minWidth: 380, minHeight: 520,
     backgroundColor: '#2b2a31',
     title: 'Quence Teams',
+    icon: path.join(__dirname, '..', 'dist', 'icon.png'), // same artwork as the installer icon (build/icon.png)
     frame: false, // custom title bar with our own window controls (same as the other Quence apps)
     autoHideMenuBar: true,
     show: false,

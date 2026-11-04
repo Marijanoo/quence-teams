@@ -13,6 +13,7 @@ import { CallView } from './components/CallView'
 import { Search } from './components/Search'
 import { Avatar, ConfirmHost } from './components/ui'
 import { TitleBar } from './components/TitleBar'
+import { BottomBar } from './components/BottomBar'
 import { CallDetail, CallsSidebar, NewCallDialog } from './components/CallsPanel'
 import { ChatMembersDialog, MeetingDialog, NewChannelDialog, NewChatDialog, NewMeetingDialog, NewTeamDialog, ProfileDialog, TeamSettingsDialog } from './components/Dialogs'
 
@@ -143,6 +144,7 @@ function Shell() {
 
         {threadId && showConvo && <ThreadPanel key={threadId} />}
       </div>
+      <BottomBar />
 
       {dialog?.type === 'newCall' && <NewCallDialog onClose={() => setDialog(null)} />}
       {dialog?.type === 'newChat' && <NewChatDialog onClose={() => setDialog(null)} />}
