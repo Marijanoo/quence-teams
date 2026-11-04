@@ -1,11 +1,13 @@
+import { isNative } from './platform'
 import type { ActivityItem, CallLog, Channel, Chat, Meeting, Message, SearchHit, Team, TeamDetail, User } from './types'
 
 const KEY_TOKEN = 'qt.token'
 const KEY_SERVER = 'qt.server'
 
-// On a website the API lives on the same origin. In Electron (file://) the user points the app at a server.
+// On a website the API lives on the same origin. In the desktop and Android apps the page is served locally, so the
+// app points at a server (this one unless the person changes it).
 export function defaultServer(): string {
-  return location.protocol.startsWith('http') ? '' : 'https://teams.kolaj.fun'
+  return location.protocol.startsWith('http') && !isNative ? '' : 'https://teams.kolaj.fun'
 }
 export const getServer = () => (localStorage.getItem(KEY_SERVER) ?? defaultServer()).replace(/\/+$/, '')
 export const setServer = (url: string) => localStorage.setItem(KEY_SERVER, url.trim())

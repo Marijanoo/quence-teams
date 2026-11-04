@@ -1,4 +1,4 @@
-import { useState, type MutableRefObject } from 'react'
+import { useEffect, useState, type MutableRefObject } from 'react'
 import { Bookmark, BookmarkCheck, CornerUpLeft, FileText, Pencil, Pin, PinOff, Smile, Trash2, Video, MessageSquareReply, Paperclip } from 'lucide-react'
 import { api, fileUrl } from '../lib/api'
 import { EMOJIS, formatBytes, formatTime, mentionsToDisplay, mentionsToRaw, plainText, renderBody } from '../lib/format'
@@ -68,7 +68,21 @@ export function MessageItem({ msg, compact, inThread, canModerate, onReply, onQu
     setEditing(false)
   }
 
-  const cls = `msg${mine ? ' mine' : ''}${compact ? ' compact' : ''}${picker ? ' menu-open' : ''}`
+  // Touch screens have no hover, so tapping a message shows its actions instead.
+  const [touchOpen, setTouchOpen] = useState(false)
+  useEffect(() => {
+    if (!touchOpen) return
+    const close = (e: Event) => { if (!(e.target as HTMLElement).closest?.(`[data-id="${msg.id}"]`)) setTouchOpen(false) }
+    document.addEventListener('pointerdown', close)
+    return () => document.removeEventListener('pointerdown', close)
+  }, [touchOpen, msg.id])
+  const onTap = (e: React.MouseEvent) => {
+    if (!window.matchMedia('(hover: none)').matches) return
+    if ((e.target as HTMLElement).closest('a, button, input, textarea, img, video, .toolbar')) return
+    setTouchOpen(o => !o)
+  }
+
+  const cls = `msg${mine ? ' mine' : ''}${compact ? ' compact' : ''}${picker ? ' menu-open' : ''}${touchOpen ? ' touch-open' : ''}`
 
   if (msg.deleted) {
     return (
@@ -80,7 +94,7 @@ export function MessageItem({ msg, compact, inThread, canModerate, onReply, onQu
   }
 
   return (
-    <div className={cls + (msg.id.startsWith('pending-') ? ' pending' : '')} data-id={msg.id}>
+    <div className={cls + (msg.id.startsWith('pending-') ? ' pending' : '')} data-id={msg.id} onClick={onTap}>
       {!mine && <div className="avatar-slot"><Avatar user={msg.author} size={36} presence /></div>}
       <div className="msg-col">
         {!compact && (

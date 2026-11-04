@@ -1,4 +1,6 @@
 import { useEffect, useState } from 'react'
+import { App as CapacitorApp } from '@capacitor/app'
+import { isNative } from './lib/platform'
 import { Bell, Calendar as CalendarIcon, MessageSquare, Phone, PhoneOff, X } from 'lucide-react'
 import { api, setUnauthorizedHandler } from './lib/api'
 import { restoreSession, useStore } from './lib/store'
@@ -60,6 +62,20 @@ function Shell() {
   const toast = useStore(s => s.toast)
   const [dialog, setDialog] = useState<DialogState | null>(null)
   const [selectedCall, setSelectedCall] = useState<CallLog | null>(null)
+
+  // Android back button: close the open thread or conversation first, and only then leave the app.
+  useEffect(() => {
+    if (!isNative) return
+    const handle = CapacitorApp.addListener('backButton', () => {
+      const st = useStore.getState()
+      if (st.activeCall) return
+      if (st.threadId) void st.openThread(null)
+      else if (st.selection) void st.select(null)
+      else if (st.quickView) st.setQuick(null)
+      else void CapacitorApp.minimizeApp()
+    })
+    return () => { void handle.then(h => h.remove()) }
+  }, [])
 
   // Upcoming meetings for the sidebar and reminders.
   useEffect(() => {

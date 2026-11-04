@@ -1,6 +1,6 @@
 {
   "name": "quence-teams",
-  "version": "0.1.4",
+  "version": "0.1.5",
   "private": true,
   "description": "Quence Teams: chat, channels, meetings",
   "main": "electron/main.cjs",
@@ -18,13 +18,17 @@
     "dist:linux": "npm run build && electron-builder --linux --publish never"
   },
   "dependencies": {
+    "electron-updater": "^6.8.3",
     "lucide-react": "^0.456.0",
     "react": "^18.3.1",
     "react-dom": "^18.3.1",
-    "zustand": "^4.5.5",
-    "electron-updater": "^6.8.3"
+    "zustand": "^4.5.5"
   },
   "devDependencies": {
+    "@capacitor/android": "^6.2.3",
+    "@capacitor/app": "^6.0.3",
+    "@capacitor/cli": "^6.2.3",
+    "@capacitor/core": "^6.2.3",
     "@types/react": "^18.3.12",
     "@types/react-dom": "^18.3.1",
     "@vitejs/plugin-react": "^4.3.3",

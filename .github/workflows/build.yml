@@ -79,3 +79,75 @@ jobs:
           generate_release_notes: true
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+  # Signed Android APK, attached to the same release. It is the web client in a WebView (Capacitor); there is no store,
+  # so the app itself offers the newer APK from the latest release. Every build must use the same release key (the
+  # repository secrets below) so each APK installs over the last one; the key is also kept in /root/secrets on the server.
+  # Secrets: ANDROID_KEYSTORE_B64, ANDROID_KEYSTORE_PASSWORD, ANDROID_KEY_PASSWORD, ANDROID_KEY_ALIAS.
+  build-android:
+    runs-on: ubuntu-latest
+    if: startsWith(github.ref, 'refs/tags/v')
+    permissions:
+      contents: write
+    defaults:
+      run:
+        working-directory: app
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: 'npm'
+          cache-dependency-path: app/package-lock.json
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Build the web client and copy it into the Android project
+        run: |
+          npm run build
+          npx cap sync android
+
+      # The build stops here without the key, so an APK is never signed with a debug key.
+      - name: The release key
+        env:
+          KEYSTORE_B64: ${{ secrets.ANDROID_KEYSTORE_B64 }}
+        run: |
+          test -n "$KEYSTORE_B64" || { echo "ANDROID_KEYSTORE_B64 is not set"; exit 1; }
+          echo "$KEYSTORE_B64" | base64 -d > "$RUNNER_TEMP/teams-release.jks"
+          echo "ANDROID_KEYSTORE_FILE=$RUNNER_TEMP/teams-release.jks" >> "$GITHUB_ENV"
+
+      - name: Build the release APK
+        working-directory: app/android
+        env:
+          ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+          ANDROID_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
+          ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+        run: |
+          VERSION="${GITHUB_REF_NAME#v}"
+          IFS=. read -r MA MI PA <<< "$VERSION"
+          export APP_VERSION="$VERSION"
+          export APP_VERSION_CODE=$((MA * 10000 + MI * 100 + PA))
+          chmod +x gradlew
+          ./gradlew assembleRelease --no-daemon --stacktrace
+
+      - name: Check it is signed with the release key
+        run: |
+          APKSIGNER=$(ls "$ANDROID_HOME"/build-tools/*/apksigner | tail -1)
+          "$APKSIGNER" verify --print-certs android/app/build/outputs/apk/release/app-release.apk | tee /tmp/certs.txt
+          grep -q "CN=Quence Teams" /tmp/certs.txt
+          cp android/app/build/outputs/apk/release/app-release.apk "QuenceTeams-${GITHUB_REF_NAME#v}.apk"
+
+      - name: Release Android artifact
+        uses: softprops/action-gh-release@v2
+        with:
+          files: app/QuenceTeams-*.apk
+          generate_release_notes: true
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

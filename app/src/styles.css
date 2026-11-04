@@ -429,3 +429,4 @@ label.field { display: grid; gap: 6px; font-size: 13px; font-weight: 600; color:
 .sp-slider { display: grid; gap: 4px; font-size: 12.5px; margin-top: 4px; }
 .sp-slider > span { display: flex; justify-content: space-between; }
 .sp-slider input[type=range] { width: 100%; accent-color: var(--accent); }
+.msg.touch-open .toolbar { display: flex; }

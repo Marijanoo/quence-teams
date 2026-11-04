@@ -131,9 +131,11 @@ export function CallView() {
           onClick={async () => setCam(await session.setCameraEnabled(!cam))}>
           {cam ? <Camera size={20} /> : <CameraOff size={20} />}
         </button>
-        <button className={`round${session.sharingScreen ? ' on' : ''}`} aria-label="Share screen" title="Share screen" onClick={async () => { await session.toggleScreenShare(); force(n => n + 1) }}>
-          <MonitorUp size={20} />
-        </button>
+        {typeof navigator.mediaDevices?.getDisplayMedia === 'function' && (
+          <button className={`round${session.sharingScreen ? ' on' : ''}`} aria-label="Share screen" title="Share screen" onClick={async () => { await session.toggleScreenShare(); force(n => n + 1) }}>
+            <MonitorUp size={20} />
+          </button>
+        )}
         <button className="round end" aria-label="Leave call" title="Leave" onClick={leaveCall}><PhoneOff size={20} /></button>
       </div>
     </div>

@@ -4,6 +4,7 @@ import { api, defaultServer, getServer, setServer } from '../lib/api'
 import { useStore } from '../lib/store'
 import { TitleBar } from './TitleBar'
 import { BottomBar } from './BottomBar'
+import { isNative } from '../lib/platform'
 
 // Mirrors the Quence API sign-in screen: title bar on top, centred form, labels above the inputs.
 export function Login() {
@@ -16,7 +17,7 @@ export function Login() {
   const [showServer, setShowServer] = useState(false)
   const [error, setError] = useState('')
   const [busy, setBusy] = useState(false)
-  const desktop = !location.protocol.startsWith('http')
+  const desktop = !location.protocol.startsWith('http') || isNative
 
   async function submit(e: React.FormEvent) {
     e.preventDefault()
