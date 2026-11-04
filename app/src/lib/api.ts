@@ -46,7 +46,7 @@ export const fileUrl = (id: string, download = false) =>
 
 export interface Bootstrap {
   me: User; presencePref: string; users: User[]; teams: Team[]; chats: Chat[]
-  presence: Record<string, string>; activityUnseen: number
+  presence: Record<string, string>; activityUnseen: number; favorites: string[]; savedIds: string[]
 }
 
 export const api = {
@@ -99,6 +99,10 @@ export const api = {
   activitySeen: () => request('POST', '/api/activity/seen'),
   search: (q: string) => request<SearchHit[]>('GET', `/api/search?q=${encodeURIComponent(q)}`),
 
+  favorite: (convoId: string, on: boolean) => request(on ? 'PUT' : 'DELETE', `/api/favorites/${convoId}`),
+  save: (id: string, on: boolean) => request(on ? 'PUT' : 'DELETE', `/api/messages/${id}/save`),
+  saved: () => request<SearchHit[]>('GET', '/api/saved'),
+  mentions: () => request<SearchHit[]>('GET', '/api/mentions'),
   callHistory: () => request<CallLog[]>('GET', '/api/calls'),
   meetings: (from: number, to: number) => request<Meeting[]>('GET', `/api/meetings?from=${from}&to=${to}`),
   createMeeting: (m: { title: string; description?: string; startsAt: number; endsAt: number; attendeeIds: string[]; convoId?: string | null }) =>

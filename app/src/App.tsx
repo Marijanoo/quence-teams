@@ -1,11 +1,12 @@
 import { useEffect, useState } from 'react'
-import { Bell, Calendar as CalendarIcon, MessageSquare, Phone, PhoneOff, Users, X } from 'lucide-react'
+import { Bell, Calendar as CalendarIcon, MessageSquare, Phone, PhoneOff, X } from 'lucide-react'
 import { api, setUnauthorizedHandler } from './lib/api'
 import { restoreSession, useStore } from './lib/store'
 import { socket } from './lib/socket'
 import type { CallLog, Meeting, Team, View } from './lib/types'
 import { Login } from './components/Login'
-import { ActivityFeed, CalendarSidebar, ChatList, TeamsTree } from './components/Sidebar'
+import { ActivityFeed, CalendarSidebar, ChatNav } from './components/Sidebar'
+import { QuickViewPane } from './components/QuickViewPane'
 import { Conversation, ThreadPanel } from './components/Conversation'
 import { Calendar } from './components/Calendar'
 import { CallView } from './components/CallView'
@@ -23,7 +24,6 @@ type DialogState =
 const RAIL: { id: View; label: string; icon: typeof Bell }[] = [
   { id: 'activity', label: 'Activity', icon: Bell },
   { id: 'chat', label: 'Chat', icon: MessageSquare },
-  { id: 'teams', label: 'Teams', icon: Users },
   { id: 'calendar', label: 'Calendar', icon: CalendarIcon },
   { id: 'calls', label: 'Calls', icon: Phone }
 ]
@@ -54,7 +54,8 @@ function Shell() {
   const online = useStore(s => s.online)
   const activityUnseen = useStore(s => s.activityUnseen)
   const chatUnread = useStore(s => s.chats.reduce((n, c) => n + c.unread, 0))
-  const teamsUnread = useStore(s => s.teams.reduce((n, t) => n + t.channels.reduce((m, c) => m + c.mentions, 0), 0))
+  const quickView = useStore(s => s.quickView)
+  const channelMentions = useStore(s => s.teams.reduce((n, t) => n + t.channels.reduce((m, c) => m + c.mentions, 0), 0))
   const toast = useStore(s => s.toast)
   const [dialog, setDialog] = useState<DialogState | null>(null)
   const [selectedCall, setSelectedCall] = useState<CallLog | null>(null)
@@ -74,10 +75,10 @@ function Shell() {
 
   // Unread count in the window title.
   useEffect(() => {
-    const n = chatUnread + teamsUnread
+    const n = chatUnread + channelMentions
     document.title = n ? `(${n}) Quence Teams` : 'Quence Teams'
     window.teamsDesktop?.setUnread(n)
-  }, [chatUnread, teamsUnread])
+  }, [chatUnread, channelMentions])
 
   // Meeting reminders five minutes before the start.
   const meetings = useStore(s => s.meetings)
@@ -95,8 +96,9 @@ function Shell() {
     return () => clearInterval(t)
   }, [meetings, toast])
 
-  const showConvo = (view === 'chat' && selection?.kind === 'chat') || (view === 'teams' && selection?.kind === 'channel')
-  const badge = (id: View) => id === 'activity' ? activityUnseen : id === 'chat' ? chatUnread : id === 'teams' ? teamsUnread : 0
+  const showConvo = view === 'chat' && !quickView && !!selection
+  const showQuick = view === 'chat' && !!quickView
+  const badge = (id: View) => id === 'activity' ? activityUnseen : id === 'chat' ? chatUnread + channelMentions : 0
 
   return (
     <div className="shell">
@@ -108,7 +110,7 @@ function Shell() {
         <Search />
       </TitleBar>
       {!online && <div className="offline-banner" role="status">Reconnecting…</div>}
-      <div className={`body${showConvo ? ' convo-open' : ''}`}>
+      <div className={`body${showConvo || showQuick ? ' convo-open' : ''}`}>
         <nav className="rail" aria-label="Main">
           {RAIL.map(r => (
             <button key={r.id} className={`rail-btn${view === r.id ? ' active' : ''}`} onClick={() => setView(r.id)} aria-label={r.label} aria-current={view === r.id}>
@@ -120,8 +122,7 @@ function Shell() {
 
         <aside className="sidebar">
           {view === 'activity' && <ActivityFeed />}
-          {view === 'chat' && <ChatList onNewChat={() => setDialog({ type: 'newChat' })} />}
-          {view === 'teams' && <TeamsTree onNewTeam={() => setDialog({ type: 'newTeam' })} onNewChannel={team => setDialog({ type: 'newChannel', team })} onManage={team => setDialog({ type: 'team', teamId: team.id })} />}
+          {view === 'chat' && <ChatNav onNewChat={() => setDialog({ type: 'newChat' })} onNewTeam={() => setDialog({ type: 'newTeam' })} onNewChannel={team => setDialog({ type: 'newChannel', team })} onManage={team => setDialog({ type: 'team', teamId: team.id })} />}
           {view === 'calls' && <CallsSidebar selectedId={selectedCall?.id ?? null} onSelect={setSelectedCall} onNewCall={() => setDialog({ type: 'newCall' })} />}
           {view === 'calendar' && <CalendarSidebar onNew={() => setDialog({ type: 'newMeeting' })} onOpen={meeting => setDialog({ type: 'meeting', meeting })} />}
         </aside>
@@ -130,6 +131,8 @@ function Shell() {
           ? <CallDetail call={selectedCall} />
           : view === 'calendar'
           ? <Calendar onNew={start => setDialog({ type: 'newMeeting', start })} onOpen={meeting => setDialog({ type: 'meeting', meeting })} />
+          : showQuick
+            ? <QuickViewPane />
           : showConvo
             ? <Conversation key={selection!.convoId} onBack={() => select(null)} onTeamSettings={teamId => setDialog({ type: 'team', teamId })} onChatMembers={chatId => setDialog({ type: 'chatMembers', chatId })} />
             : <div className="main"><div className="empty" style={{ margin: 'auto' }}>

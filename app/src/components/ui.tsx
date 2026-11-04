@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, type ReactNode } from 'react'
+import { useEffect, useLayoutEffect, useRef, useState, type ReactNode } from 'react'
 import { X } from 'lucide-react'
 import { avatarColor, initials } from '../lib/format'
 import { useStore } from '../lib/store'
@@ -60,16 +60,40 @@ export function useClickOutside<T extends HTMLElement>(onOutside: () => void, ac
   return ref
 }
 
+// Nudges a popup back inside the window if it would run off an edge (and flips it above its anchor at the bottom).
+export function useKeepInViewport<T extends HTMLElement>(active = true) {
+  const ref = useRef<T>(null)
+  useLayoutEffect(() => {
+    const el = ref.current
+    if (!el || !active) return
+    el.style.transform = ''
+    const r = el.getBoundingClientRect()
+    const pad = 8
+    let dx = 0
+    if (r.right > window.innerWidth - pad) dx = window.innerWidth - pad - r.right
+    if (r.left + dx < pad) dx = pad - r.left
+    if (dx) el.style.transform = `translateX(${dx}px)`
+    if (r.bottom > window.innerHeight - pad && r.top - r.height > pad) {
+      el.style.top = 'auto'
+      el.style.bottom = '100%'
+      el.style.marginTop = '0'
+      el.style.marginBottom = '4px'
+    }
+  })
+  return ref
+}
+
 export interface MenuItem { label: string; icon?: ReactNode; onClick: () => void; danger?: boolean; hidden?: boolean; divider?: boolean }
 
 export function MenuButton({ items, button, align = 'right' }: { items: MenuItem[]; button: ReactNode; align?: 'left' | 'right' }) {
   const [open, setOpen] = useState(false)
   const ref = useClickOutside<HTMLDivElement>(() => setOpen(false), open)
+  const menuRef = useKeepInViewport<HTMLDivElement>(open)
   return (
     <div ref={ref} style={{ position: 'relative' }}>
       <div onClick={() => setOpen(o => !o)}>{button}</div>
       {open && (
-        <div className="menu" style={{ top: '100%', [align]: 0, marginTop: 4 }}>
+        <div ref={menuRef} className="menu" style={{ top: '100%', [align]: 0, marginTop: 4 }}>
           {items.filter(i => !i.hidden).map((i, idx) => i.divider
             ? <hr key={idx} />
             : <button key={idx} className={i.danger ? 'danger' : ''} onClick={() => { setOpen(false); i.onClick() }}>{i.icon}{i.label}</button>)}

@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
-import { ArrowLeft, FileText, Hash, Lock, Phone, Settings, Users, Video } from 'lucide-react'
+import { ArrowLeft, FileText, Hash, Lock, Phone, Settings, Star, Users, Video } from 'lucide-react'
 import { api, fileUrl } from '../lib/api'
 import { formatBytes, formatDay, formatShort, sameDay } from '../lib/format'
 import { askConfirm, chatTitle, useStore } from '../lib/store'
@@ -24,6 +24,8 @@ export function Conversation({ onBack, onTeamSettings, onChatMembers }: { onBack
   const joinCall = useStore(s => s.joinCall)
   const toast = useStore(s => s.toast)
   const callParticipants = useStore(s => s.calls[selection.convoId])
+  const isFav = useStore(s => s.favorites.includes(selection.convoId))
+  const toggleFavorite = useStore(s => s.toggleFavorite)
 
   const [tab, setTab] = useState<Tab>('posts')
   const [teamDetail, setTeamDetail] = useState<TeamDetail | null>(null)
@@ -117,6 +119,8 @@ export function Conversation({ onBack, onTeamSettings, onChatMembers }: { onBack
             <span className="t">{title}</span>
           </h2>
           {channel?.description && <span className="muted" style={{ fontSize: 12.5, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{channel.description}</span>}
+          <button className={`icon-btn${isFav ? ' active' : ''}`} onClick={() => void toggleFavorite(selection.convoId)} aria-pressed={isFav}
+            title={isFav ? 'Remove from favorites' : 'Add to favorites'} aria-label={isFav ? 'Remove from favorites' : 'Add to favorites'}><Star size={17} fill={isFav ? 'currentColor' : 'none'} /></button>
           <div className="grow" />
           {inCall ? <span className="badge" style={{ background: 'var(--success)', color: 'oklch(0.2 0.02 160)' }}>● {inCall} in call</span> : null}
           <button className="btn sm" onClick={startMeeting} title={selection.kind === 'channel' ? 'Start a meeting in this channel' : 'Start a call'}>

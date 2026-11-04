@@ -1,18 +1,19 @@
-import { useState } from 'react'
-import { CornerUpLeft, FileText, Pencil, Pin, PinOff, Smile, Trash2, Video, MessageSquareReply, Paperclip } from 'lucide-react'
+import { useState, type MutableRefObject } from 'react'
+import { Bookmark, BookmarkCheck, CornerUpLeft, FileText, Pencil, Pin, PinOff, Smile, Trash2, Video, MessageSquareReply, Paperclip } from 'lucide-react'
 import { api, fileUrl } from '../lib/api'
 import { EMOJIS, formatBytes, formatTime, mentionsToDisplay, mentionsToRaw, plainText, renderBody } from '../lib/format'
 import { askConfirm, convoName, useStore } from '../lib/store'
 import type { Message } from '../lib/types'
-import { Avatar, useClickOutside } from './ui'
+import { Avatar, useClickOutside, useKeepInViewport } from './ui'
 
 const QUICK = EMOJIS.slice(0, 6)
 
 function ReactionPicker({ onPick, onClose }: { onPick: (e: string) => void; onClose: () => void }) {
-  const ref = useClickOutside<HTMLDivElement>(onClose)
+  const outside = useClickOutside<HTMLDivElement>(onClose)
+  const fit = useKeepInViewport<HTMLDivElement>()
   const [more, setMore] = useState(false)
   return (
-    <div ref={ref} className="popup" style={{ right: 0, top: '100%', marginTop: 4, padding: 4 }}>
+    <div ref={el => { (outside as MutableRefObject<HTMLDivElement | null>).current = el; (fit as MutableRefObject<HTMLDivElement | null>).current = el }} className="popup" style={{ left: 0, top: '100%', marginTop: 4, padding: 4 }}>
       {more
         ? <div className="emoji-grid">{EMOJIS.map(e => <button key={e} onClick={() => { onPick(e); onClose() }} aria-label={`React ${e}`}>{e}</button>)}</div>
         : <div className="quick" style={{ display: 'flex' }}>
@@ -48,6 +49,8 @@ export function MessageItem({ msg, compact, inThread, canModerate, onReply, onQu
   const callParticipants = useStore(s => s.calls[msg.convoId])
   const joinCall = useStore(s => s.joinCall)
   const goTo = useStore(s => s.goTo)
+  const saved = useStore(s => s.savedIds.includes(msg.id))
+  const toggleSaved = useStore(s => s.toggleSaved)
   const title = useStore(s => convoName(s, msg.convoId))
   const toast = useStore(s => s.toast)
   const [editing, setEditing] = useState(false)
@@ -85,6 +88,7 @@ export function MessageItem({ msg, compact, inThread, canModerate, onReply, onQu
             {!mine && <span className="author">{msg.author?.name ?? 'Unknown'}</span>}
             <span className="stamp">{formatTime(msg.createdAt)}</span>
             {msg.editedAt && <span className="edited">(edited)</span>}
+            {saved && <BookmarkCheck size={12} color="var(--accent)" aria-label="Saved" />}
           </div>
         )}
 
@@ -153,6 +157,7 @@ export function MessageItem({ msg, compact, inThread, canModerate, onReply, onQu
             {onQuote && msg.kind === 'text' && <button className="icon-btn" title="Reply" onClick={() => onQuote(msg)}><CornerUpLeft size={16} /></button>}
             {!onQuote && !inThread && msg.kind === 'text' && <button className="icon-btn" title="Reply" onClick={() => onReply?.(msg)}><CornerUpLeft size={16} /></button>}
             {mine && msg.kind === 'text' && <button className="icon-btn" title="Edit" onClick={() => { setDraft(mentionsToDisplay(msg.body, users)); setEditing(true) }}><Pencil size={16} /></button>}
+            <button className="icon-btn" title={saved ? 'Remove from saved' : 'Save'} aria-pressed={saved} onClick={() => void toggleSaved(msg.id)}>{saved ? <BookmarkCheck size={16} color="var(--accent)" /> : <Bookmark size={16} />}</button>
             {!inThread && <button className="icon-btn" title={msg.pinned ? 'Unpin' : 'Pin'} onClick={() => run(api.pin(msg.id, !msg.pinned))}>{msg.pinned ? <PinOff size={16} /> : <Pin size={16} />}</button>}
             {(mine || canModerate) && <button className="icon-btn" title="Delete" onClick={async () => {
               if (await askConfirm({ title: 'Delete this message?', message: 'This cannot be undone.', confirmLabel: 'Delete', danger: true })) void run(api.remove(msg.id))

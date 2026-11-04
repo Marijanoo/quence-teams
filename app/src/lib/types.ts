@@ -45,5 +45,6 @@ export interface CallLog {
   status: 'joined' | 'missed' | 'declined'; participants: User[]; canCallBack: boolean
 }
 
-export type View = 'activity' | 'chat' | 'teams' | 'calendar' | 'calls'
+export type View = 'activity' | 'chat' | 'calendar' | 'calls'
+export type QuickView = 'mentions' | 'drafts' | 'saved'
 export type Selection = { convoId: string; kind: 'channel' | 'chat'; teamId?: string }

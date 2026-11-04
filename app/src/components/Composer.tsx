@@ -9,14 +9,21 @@ import { Avatar, useClickOutside } from './ui'
 
 const MAX_FILE = 25 * 1024 * 1024
 
-export function Composer({ convoId, parentId, placeholder, allowSubject, onSent, members, quote, onClearQuote }: {
+interface ComposerProps {
   convoId: string; parentId?: string; placeholder: string; allowSubject?: boolean; onSent?: () => void; members: User[]
   quote?: Message | null; onClearQuote?: () => void
-}) {
+}
+
+// Re-created per conversation/thread so each one starts from its own saved draft.
+export function Composer(props: ComposerProps) {
+  return <ComposerInner key={props.parentId ? `${props.convoId}#${props.parentId}` : props.convoId} {...props} />
+}
+
+function ComposerInner({ convoId, parentId, placeholder, allowSubject, onSent, members, quote, onClearQuote }: ComposerProps) {
   const me = useStore(s => s.me)!
   const toast = useStore(s => s.toast)
   const users = useStore(s => s.users)
-  const [text, setText] = useState('')
+  const [text, setText] = useState(() => useStore.getState().drafts[parentId ? `${convoId}#${parentId}` : convoId]?.text ?? '')
   const [subject, setSubject] = useState('')
   const [showSubject, setShowSubject] = useState(false)
   const [files, setFiles] = useState<File[]>([])
@@ -30,15 +37,10 @@ export function Composer({ convoId, parentId, placeholder, allowSubject, onSent,
   const lastTyping = useRef(0)
   const emojiRef = useClickOutside<HTMLDivElement>(() => setEmoji(false), emoji)
 
-  // Drafts survive switching conversations.
-  const draftKey = `qt.draft.${convoId}.${parentId ?? ''}`
-  useEffect(() => {
-    try { setText(sessionStorage.getItem(draftKey) ?? '') } catch { setText('') }
-    setSubject(''); setShowSubject(false); setFiles([]); setMention(null)
-  }, [draftKey])
-  useEffect(() => {
-    try { text ? sessionStorage.setItem(draftKey, text) : sessionStorage.removeItem(draftKey) } catch { /* storage unavailable */ }
-  }, [text, draftKey])
+  // Drafts survive switching conversations and restarting the app.
+  const draftKey = parentId ? `${convoId}#${parentId}` : convoId
+  const setDraft = useStore(s => s.setDraft)
+  useEffect(() => { setDraft(draftKey, text) }, [text, draftKey, setDraft])
 
   useEffect(() => {
     const el = area.current

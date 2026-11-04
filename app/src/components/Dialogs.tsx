@@ -50,7 +50,7 @@ export function NewTeamDialog({ onClose }: { onClose: () => void }) {
     setBusy(true)
     try {
       const team = await api.createTeam(name, description)
-      useStore.setState(s => ({ teams: [...s.teams, team], view: 'teams' }))
+      useStore.setState(s => ({ teams: [...s.teams, team], view: 'chat', quickView: null }))
       await select({ convoId: team.channels[0].id, kind: 'channel', teamId: team.id })
       onClose()
     } catch (e) { toast((e as Error).message, 'error'); setBusy(false) }
@@ -86,7 +86,7 @@ export function NewChannelDialog({ team, onClose }: { team: Team; onClose: () =>
     setBusy(true)
     try {
       const c = await api.createChannel(team.id, name, isPrivate, description)
-      useStore.setState(s => ({ teams: s.teams.map(t => t.id === team.id ? { ...t, channels: [...t.channels, c] } : t), view: 'teams' }))
+      useStore.setState(s => ({ teams: s.teams.map(t => t.id === team.id ? { ...t, channels: [...t.channels, c] } : t), view: 'chat', quickView: null }))
       await select({ convoId: c.id, kind: 'channel', teamId: team.id })
       onClose()
     } catch (e) { toast((e as Error).message, 'error'); setBusy(false) }

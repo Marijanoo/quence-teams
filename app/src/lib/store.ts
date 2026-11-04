@@ -1,9 +1,10 @@
 import { create } from 'zustand'
 import { api, ApiError, getToken, setToken } from './api'
 import { socket } from './socket'
-import type { CallLog, Chat, Meeting, Message, Presence, Selection, Team, User, View } from './types'
+import type { CallLog, Chat, Meeting, Message, Presence, QuickView, Selection, Team, User, View } from './types'
 
 interface ConvoCache { messages: Message[]; hasMore: boolean; loaded: boolean }
+export interface Draft { text: string; at: number }
 export interface Toast { id: number; text: string; kind?: 'error' | 'info' }
 export interface IncomingCall { room: string; convoId: string; from: User }
 export interface ActiveCall { room: string; title: string }
@@ -19,6 +20,10 @@ interface State {
   activityUnseen: number
   meetings: Meeting[]
   callHistory: CallLog[]
+  favorites: string[]
+  savedIds: string[]
+  drafts: Record<string, Draft>
+  quickView: QuickView | null
   ready: boolean
   online: boolean
 
@@ -41,6 +46,10 @@ interface State {
   bootstrap: () => Promise<void>
   refreshTeams: () => Promise<void>
   setView: (v: View) => void
+  setQuick: (q: QuickView | null) => void
+  toggleFavorite: (convoId: string) => Promise<void>
+  toggleSaved: (messageId: string) => Promise<void>
+  setDraft: (key: string, text: string) => void
   select: (s: Selection | null) => Promise<void>
   goTo: (convoId: string, messageId?: string, threadId?: string) => Promise<void>
   openThread: (id: string | null) => Promise<void>
@@ -77,7 +86,7 @@ export function chatTitle(chat: Chat, meId?: string): string {
 
 function isViewing(convoId: string) {
   const { selection, view } = useStore.getState()
-  return !!selection && selection.convoId === convoId && (view === 'chat' || view === 'teams') && document.hasFocus()
+  return !!selection && selection.convoId === convoId && view === 'chat' && !useStore.getState().quickView && document.hasFocus()
 }
 
 function bump(s: State, msg: Message, mine: boolean): Partial<State> {
@@ -98,14 +107,14 @@ function bump(s: State, msg: Message, mine: boolean): Partial<State> {
 }
 
 export const useStore = create<State>((set, get) => ({
-  me: null, presencePref: 'available', users: {}, presence: {}, teams: [], chats: [], activityUnseen: 0, meetings: [], callHistory: [],
+  me: null, presencePref: 'available', users: {}, presence: {}, teams: [], chats: [], activityUnseen: 0, meetings: [], callHistory: [], favorites: [], savedIds: [], drafts: {}, quickView: null,
   ready: false, online: false,
   view: 'chat', selection: null, threadId: null, jumpTo: null, convos: {}, threads: {}, typing: {},
   calls: {}, incoming: null, activeCall: null, toasts: [], confirmState: null,
 
   async signIn(token, user) {
     setToken(token)
-    set({ me: user })
+    set({ me: user, drafts: loadDrafts(user.id) })
     await get().bootstrap()
     wireSocket()
     socket.connect()
@@ -116,7 +125,7 @@ export const useStore = create<State>((set, get) => ({
     setToken(null)
     set({
       me: null, ready: false, teams: [], chats: [], users: {}, presence: {}, convos: {}, threads: {}, selection: null,
-      threadId: null, jumpTo: null, meetings: [], callHistory: [], activeCall: null, incoming: null, typing: {}, calls: {}
+      threadId: null, jumpTo: null, meetings: [], callHistory: [], favorites: [], savedIds: [], drafts: {}, quickView: null, activeCall: null, incoming: null, typing: {}, calls: {}
     })
   },
 
@@ -124,7 +133,9 @@ export const useStore = create<State>((set, get) => ({
     const b = await api.bootstrap()
     set({
       me: b.me, presencePref: b.presencePref as Presence, users: Object.fromEntries(b.users.map(u => [u.id, u])),
-      presence: b.presence as Record<string, Presence>, teams: b.teams, chats: b.chats, activityUnseen: b.activityUnseen, ready: true
+      presence: b.presence as Record<string, Presence>, teams: b.teams, chats: b.chats, activityUnseen: b.activityUnseen, ready: true,
+      favorites: b.favorites, savedIds: b.savedIds,
+      drafts: Object.keys(get().drafts).length ? get().drafts : loadDrafts(b.me.id)
     })
   },
 
@@ -134,9 +145,39 @@ export const useStore = create<State>((set, get) => ({
   },
 
   setView(view) { set({ view }) },
+  setQuick(quickView) { set({ quickView, ...(quickView ? { selection: null, threadId: null } : {}) }) },
+
+  async toggleFavorite(convoId) {
+    const on = !get().favorites.includes(convoId)
+    set(s => ({ favorites: on ? [...s.favorites, convoId] : s.favorites.filter(id => id !== convoId) }))
+    try { await api.favorite(convoId, on) } catch (e) {
+      set(s => ({ favorites: on ? s.favorites.filter(id => id !== convoId) : [...s.favorites, convoId] }))
+      get().toast((e as Error).message, 'error')
+    }
+  },
+
+  async toggleSaved(messageId) {
+    const on = !get().savedIds.includes(messageId)
+    set(s => ({ savedIds: on ? [...s.savedIds, messageId] : s.savedIds.filter(id => id !== messageId) }))
+    try { await api.save(messageId, on) } catch (e) {
+      set(s => ({ savedIds: on ? s.savedIds.filter(id => id !== messageId) : [...s.savedIds, messageId] }))
+      get().toast((e as Error).message, 'error')
+    }
+  },
+
+  // Unsent text is kept per conversation (and per thread) and survives restarts.
+  setDraft(key, text) {
+    const me = get().me
+    set(s => {
+      const drafts = { ...s.drafts }
+      if (text.trim()) drafts[key] = { text, at: Date.now() }; else delete drafts[key]
+      if (me) { try { localStorage.setItem(`qt.drafts.${me.id}`, JSON.stringify(drafts)) } catch { /* storage unavailable */ } }
+      return { drafts }
+    })
+  },
 
   async select(selection) {
-    set({ selection, threadId: null })
+    set({ selection, threadId: null, ...(selection ? { quickView: null } : {}) })
     if (!selection) return
     const id = selection.convoId
     if (!get().convos[id]?.loaded) {
@@ -160,13 +201,13 @@ export const useStore = create<State>((set, get) => ({
   async goTo(convoId, messageId, threadId) {
     const st = get()
     let selection: Selection | null = null
-    let view: View = 'chat'
+    const view: View = 'chat'
     for (const t of st.teams) {
-      if (t.channels.some(c => c.id === convoId)) { selection = { convoId, kind: 'channel', teamId: t.id }; view = 'teams' }
+      if (t.channels.some(c => c.id === convoId)) selection = { convoId, kind: 'channel', teamId: t.id }
     }
     if (!selection && st.chats.some(c => c.id === convoId)) selection = { convoId, kind: 'chat' }
     if (!selection) return
-    set({ view })
+    set({ view, quickView: null })
     await get().select(selection)
     if (threadId) await get().openThread(threadId)
     if (messageId) {
@@ -361,4 +402,8 @@ export function askConfirm(opts: { title: string; message?: string; confirmLabel
   return new Promise(resolve => {
     useStore.setState({ confirmState: { title: opts.title, message: opts.message, confirmLabel: opts.confirmLabel ?? 'Confirm', danger: opts.danger, resolve } })
   })
+}
+
+function loadDrafts(userId: string): Record<string, Draft> {
+  try { return JSON.parse(localStorage.getItem(`qt.drafts.${userId}`) ?? '{}') } catch { return {} }
 }

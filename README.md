@@ -80,6 +80,7 @@ location / {
 
 - Frameless window with the same custom title bar and window buttons as the other Quence apps.
 - **Zoom:** `Ctrl` + `+` / `Ctrl` + `-` / `Ctrl` + `0` (also `Ctrl` + mouse wheel). The level is remembered.
+- One **Chat** navigation like the newer Teams: quick views (Mentions, Drafts, Saved), Favorites, Chats, and Teams with their channels. Star any chat or channel to favorite it; drafts are kept across restarts.
 - In chats, **Reply** quotes the message (like Teams); in channels it opens a thread.
 - The **Calls** tab on the left shows call history (incoming, outgoing, missed) with call back.
 
