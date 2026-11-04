@@ -11,6 +11,25 @@ import { GroupAvatar, MenuButton } from './ui'
 
 type Tab = 'posts' | 'files' | 'pins'
 
+function followScroll(el: HTMLElement, stick: React.MutableRefObject<boolean>, lastTop: React.MutableRefObject<number>) {
+  const gap = el.scrollHeight - el.scrollTop - el.clientHeight
+  if (gap < 80) stick.current = true
+  else if (el.scrollTop < lastTop.current) stick.current = false
+  lastTop.current = el.scrollTop
+}
+
+// While the reader is at the bottom, keep them there as the content grows (images and files finish loading
+// after the first scroll). Scrolling up on purpose turns this off until they come back to the bottom.
+function useFollowBottom(scroller: React.RefObject<HTMLDivElement>, inner: React.RefObject<HTMLDivElement>, stick: React.MutableRefObject<boolean>, dep: unknown) {
+  useEffect(() => {
+    const el = scroller.current, content = inner.current
+    if (!el || !content) return
+    const ro = new ResizeObserver(() => { if (stick.current) el.scrollTop = el.scrollHeight })
+    ro.observe(content)
+    return () => ro.disconnect()
+  }, [scroller, inner, stick, dep])
+}
+
 export function Conversation({ onBack, onTeamSettings, onChatMembers }: { onBack: () => void; onTeamSettings: (teamId: string) => void; onChatMembers: (chatId: string) => void }) {
   const selection = useStore(s => s.selection)!
   const me = useStore(s => s.me)!
@@ -37,7 +56,7 @@ export function Conversation({ onBack, onTeamSettings, onChatMembers }: { onBack
   const channel = team?.channels.find(c => c.id === selection.convoId)
   const chat = selection.kind === 'chat' ? chats.find(c => c.id === selection.convoId) : undefined
 
-  useEffect(() => { setTab('posts'); setQuote(null) }, [selection.convoId])
+  useEffect(() => { setTab('posts'); setQuote(null); stick.current = true }, [selection.convoId])
 
   useEffect(() => {
     setTeamDetail(null)
@@ -59,6 +78,8 @@ export function Conversation({ onBack, onTeamSettings, onChatMembers }: { onBack
   // ----- scrolling -----
   const scroller = useRef<HTMLDivElement>(null)
   const stick = useRef(true)
+  const inner = useRef<HTMLDivElement>(null)
+  useFollowBottom(scroller, inner, stick, tab)
   const prev = useRef<{ first?: string; last?: string; height: number; convo: string }>({ height: 0, convo: '' })
 
   useLayoutEffect(() => {
@@ -72,10 +93,12 @@ export function Conversation({ onBack, onTeamSettings, onChatMembers }: { onBack
     prev.current = { first, last, height: el.scrollHeight, convo: selection.convoId }
   }, [messages, selection.convoId, me.id, tab])
 
+  const lastTop = useRef(0)
   const onScroll = () => {
     const el = scroller.current
     if (!el) return
-    stick.current = el.scrollHeight - el.scrollTop - el.clientHeight < 80
+    // Only scrolling *up* means "I left the bottom". Content growing under us (images loading) must not.
+    followScroll(el, stick, lastTop)
     prev.current.height = el.scrollHeight
     if (el.scrollTop < 60 && cache?.hasMore) void loadMore(selection.convoId)
   }
@@ -148,6 +171,7 @@ export function Conversation({ onBack, onTeamSettings, onChatMembers }: { onBack
       {tab === 'posts' && (
         <>
           <div className="messages" ref={scroller} onScroll={onScroll}>
+            <div ref={inner}>
             {cache?.hasMore && <div className="empty" style={{ padding: 8 }}><button className="btn sm ghost" onClick={() => loadMore(selection.convoId)}>Load older messages</button></div>}
             {!cache?.loaded && <div className="empty">Loading…</div>}
             {cache?.loaded && messages.length === 0 && (
@@ -168,6 +192,7 @@ export function Conversation({ onBack, onTeamSettings, onChatMembers }: { onBack
                 </div>
               )
             })}
+            </div>
           </div>
           <div className="typing" aria-live="polite">{typingText}</div>
           <Composer convoId={selection.convoId} placeholder={selection.kind === 'channel' ? `Start a new post in #${title}` : 'Type a message'}
@@ -214,6 +239,10 @@ export function ThreadPanel() {
   const me = useStore(s => s.me)!
   const [members, setMembers] = useState<User[]>([])
   const scroller = useRef<HTMLDivElement>(null)
+  const inner = useRef<HTMLDivElement>(null)
+  const stick = useRef(true)
+  const threadLastTop = useRef(0)
+  useFollowBottom(scroller, inner, stick, threadId)
 
   useEffect(() => {
     if (selection.kind === 'chat') setMembers(chats.find(c => c.id === selection.convoId)?.members ?? [])
@@ -230,13 +259,15 @@ export function ThreadPanel() {
         <span>Thread</span>
         <button className="btn sm ghost" onClick={() => openThread(null)}>Close</button>
       </div>
-      <div className="messages" ref={scroller}>
+      <div className="messages" ref={scroller} onScroll={() => { if (scroller.current) followScroll(scroller.current, stick, threadLastTop) }}>
+        <div ref={inner}>
         <div className="thread-root"><MessageItem msg={root} inThread canModerate={isOwner} /></div>
         {replies.map((m, i) => {
           const before = replies[i - 1]
           const compact = !!before && before.author?.id === m.author?.id && m.createdAt - before.createdAt < 5 * 60_000 && !before.deleted
           return <MessageItem key={m.id} msg={m} inThread compact={compact} canModerate={isOwner} />
         })}
+        </div>
       </div>
       <Composer convoId={selection.convoId} parentId={root.id} placeholder={`Reply to ${root.author?.id === me.id ? 'yourself' : root.author?.name ?? 'thread'}`} members={members} />
     </aside>

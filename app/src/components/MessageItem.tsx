@@ -119,7 +119,7 @@ export function MessageItem({ msg, compact, inThread, canModerate, onReply, onQu
             {msg.attachments.length > 0 && (
               <div className="attachments">
                 {msg.attachments.map(a => /^image\/(png|jpe?g|gif|webp)$/.test(a.mime)
-                  ? <img key={a.id} className="attach-img" src={fileUrl(a.id)} alt={a.name} loading="lazy" onClick={() => onImage?.(fileUrl(a.id))} />
+                  ? <img key={a.id} className="attach-img" src={fileUrl(a.id)} alt={a.name} onClick={() => onImage?.(fileUrl(a.id))} />
                   : <a key={a.id} className="attach-file" href={fileUrl(a.id, true)} download={a.name}>
                       <FileText size={20} /><div style={{ minWidth: 0 }}><div className="name">{a.name}</div><div className="muted" style={{ fontSize: 12 }}>{formatBytes(a.size)}</div></div>
                     </a>)}

@@ -138,7 +138,7 @@ label.field { display: grid; gap: 6px; font-size: 13px; font-weight: 600; color:
 .tab.active { color: var(--fg); border-bottom-color: var(--accent); }
 .head-row { display: flex; width: 100%; align-items: center; gap: 8px; min-height: 36px; }
 
-.messages { flex: 1; overflow-y: auto; overflow-x: hidden; padding: 20px 8px 8px; min-height: 0; }
+.messages { overflow-anchor: none; flex: 1; overflow-y: auto; overflow-x: hidden; padding: 20px 8px 8px; min-height: 0; }
 .day-divider { display: flex; align-items: center; gap: 12px; margin: 14px 12px; color: var(--fg-dim); font-size: 12px; }
 .day-divider::before, .day-divider::after { content: ''; flex: 1; height: 1px; background: var(--border-soft); }
 .md-code { background: var(--bg-deep); border-radius: 4px; padding: 1px 5px; font-family: ui-monospace, Menlo, Consolas, monospace; font-size: 12.5px; }
