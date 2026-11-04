@@ -1,6 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { AtSign, Paperclip, Send, Smile, X, Type } from 'lucide-react'
-import { api } from '../lib/api'
 import { EMOJIS, formatBytes, mentionsToRaw, plainText } from '../lib/format'
 import { useStore } from '../lib/store'
 import { socket } from '../lib/socket'
@@ -91,18 +90,21 @@ function ComposerInner({ convoId, parentId, placeholder, allowSubject, onSent, m
 
   async function send() {
     if (sending || (!text.trim() && !files.length)) return
-    setSending(true)
-    try {
-      await api.send(convoId, mentionsToRaw(text, members), { parentId, subject: showSubject ? subject : undefined, files, replyTo: quote?.id })
-      setText(''); setSubject(''); setShowSubject(false); setFiles([])
-      onClearQuote?.()
-      onSent?.()
-    } catch (e) {
-      toast((e as Error).message, 'error')
-    } finally {
-      setSending(false)
-      area.current?.focus()
+    const draft = { text, subject, showSubject, files, quote }
+    const hasFiles = files.length > 0
+    // Clear right away so the box is ready for the next message; put everything back if the send fails.
+    setText(''); setSubject(''); setShowSubject(false); setFiles([])
+    onClearQuote?.()
+    onSent?.()
+    if (hasFiles) setSending(true)
+    const ok = await useStore.getState().sendMessage(convoId, mentionsToRaw(draft.text, members), {
+      parentId, subject: draft.showSubject ? draft.subject : undefined, files: draft.files, replyTo: draft.quote
+    })
+    if (!ok) {
+      setText(t => t || draft.text); setSubject(draft.subject); setShowSubject(draft.showSubject); setFiles(f => f.length ? f : draft.files)
     }
+    setSending(false)
+    area.current?.focus()
   }
 
   return (

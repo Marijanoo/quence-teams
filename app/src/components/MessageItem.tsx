@@ -80,7 +80,7 @@ export function MessageItem({ msg, compact, inThread, canModerate, onReply, onQu
   }
 
   return (
-    <div className={cls} data-id={msg.id}>
+    <div className={cls + (msg.id.startsWith('pending-') ? ' pending' : '')} data-id={msg.id}>
       {!mine && <div className="avatar-slot"><Avatar user={msg.author} size={36} presence /></div>}
       <div className="msg-col">
         {!compact && (
@@ -148,7 +148,7 @@ export function MessageItem({ msg, compact, inThread, canModerate, onReply, onQu
           </button>
         )}
 
-        {!editing && (
+        {!editing && !msg.id.startsWith('pending-') && (
           <div className="toolbar">
             <div style={{ position: 'relative' }}>
               <button className="icon-btn" title="React" onClick={() => setPicker(p => !p)}><Smile size={16} /></button>

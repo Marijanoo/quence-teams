@@ -49,6 +49,7 @@ interface State {
   setQuick: (q: QuickView | null) => void
   toggleFavorite: (convoId: string) => Promise<void>
   toggleSaved: (messageId: string) => Promise<void>
+  sendMessage: (convoId: string, body: string, opts?: { parentId?: string; subject?: string; files?: File[]; replyTo?: Message | null }) => Promise<boolean>
   setDraft: (key: string, text: string) => void
   select: (s: Selection | null) => Promise<void>
   goTo: (convoId: string, messageId?: string, threadId?: string) => Promise<void>
@@ -67,6 +68,17 @@ function upsert(list: Message[], msg: Message): Message[] {
   const i = list.findIndex(m => m.id === msg.id)
   if (i >= 0) { const copy = list.slice(); copy[i] = msg; return copy }
   return [...list, msg].sort((a, b) => a.seq - b.seq)
+}
+
+const isPending = (m: Message) => m.id.startsWith('pending-')
+
+// Adds or removes a not-yet-confirmed message in the conversation list or thread it belongs to.
+function withLocal(st: State, msg: Message, change: (list: Message[]) => Message[]): Partial<State> {
+  if (msg.parentId) {
+    return st.threads[msg.parentId] ? { threads: { ...st.threads, [msg.parentId]: change(st.threads[msg.parentId]) } } : {}
+  }
+  const c = st.convos[msg.convoId]
+  return c ? { convos: { ...st.convos, [msg.convoId]: { ...c, messages: change(c.messages) } } } : {}
 }
 
 export function convoName(s: State, convoId: string): string {
@@ -153,6 +165,29 @@ export const useStore = create<State>((set, get) => ({
     try { await api.favorite(convoId, on) } catch (e) {
       set(s => ({ favorites: on ? s.favorites.filter(id => id !== convoId) : [...s.favorites, convoId] }))
       get().toast((e as Error).message, 'error')
+    }
+  },
+
+  // Shows the message right away; the server's copy replaces it when it arrives. Messages with files wait for the upload.
+  async sendMessage(convoId, body, opts = {}) {
+    const me = get().me!
+    const q = opts.replyTo
+    const pending: Message = {
+      id: 'pending-' + Math.random().toString(36).slice(2), seq: Number.MAX_SAFE_INTEGER, convoId, parentId: opts.parentId ?? null,
+      replyTo: q ? { id: q.id, convoId: q.convoId, author: q.author, snippet: q.body.slice(0, 200), deleted: false, hasAttachment: q.attachments.length > 0 } : null,
+      kind: 'text', subject: opts.subject ?? '', author: me, body, createdAt: Date.now(), editedAt: null, deleted: false, pinned: false,
+      reactions: [], attachments: [], replyCount: 0, lastReplyAt: null
+    }
+    const optimistic = !opts.files?.length
+    if (optimistic) set(st => withLocal(st, pending, list => [...list, pending]))
+    try {
+      const sent = await api.send(convoId, body, { parentId: opts.parentId, subject: opts.subject, files: opts.files, replyTo: opts.replyTo?.id })
+      set(st => withLocal(st, pending, list => upsert(list.filter(m => m.id !== pending.id), sent)))
+      return true
+    } catch (e) {
+      if (optimistic) set(st => withLocal(st, pending, list => list.filter(m => m.id !== pending.id)))
+      get().toast((e as Error).message, 'error')
+      return false
     }
   },
 
@@ -284,6 +319,10 @@ function wireSocket() {
   socket.on('message.new', (msg: Message) => {
     const s = get()
     const mine = msg.author?.id === s.me?.id
+    if (mine) set(st => withLocal(st, msg, list => {
+      const i = list.findIndex(m => isPending(m) && m.body === msg.body)
+      return i < 0 ? list : list.filter((_, j) => j !== i)
+    }))
     if (msg.parentId) {
       set(st => ({
         threads: st.threads[msg.parentId!] ? { ...st.threads, [msg.parentId!]: upsert(st.threads[msg.parentId!], msg) } : st.threads,

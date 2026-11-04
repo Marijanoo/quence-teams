@@ -7,12 +7,12 @@ export interface Participant {
   connection: RTCPeerConnectionState | 'new'
 }
 
-const ICE: RTCConfiguration = { iceServers: [{ urls: ['stun:stun.l.google.com:19302', 'stun:stun1.l.google.com:19302'] }] }
+const FALLBACK_ICE: RTCIceServer[] = [{ urls: ['stun:stun.l.google.com:19302', 'stun:stun1.l.google.com:19302'] }]
 
 // Full-mesh WebRTC: every participant connects to every other one. Fine for small calls (up to ~6).
 // Signalling (offers, answers, ICE candidates) is relayed by the Teams server over the WebSocket.
 export class CallSession {
-  private peers = new Map<string, { pc: RTCPeerConnection; makingOffer: boolean; polite: boolean; streams: Map<string, MediaStream>; screenId: string | null; pendingIce: RTCIceCandidateInit[] }>()
+  private peers = new Map<string, { pc: RTCPeerConnection; makingOffer: boolean; polite: boolean; streams: Map<string, MediaStream>; screenId: string | null | undefined; pendingIce: RTCIceCandidateInit[] }>()
   private offs: (() => void)[] = []
   private screenTrack: MediaStreamTrack | null = null
   private screenStream: MediaStream | null = null
@@ -21,7 +21,7 @@ export class CallSession {
   onError: (msg: string) => void = () => {}
   closed = false
 
-  constructor(private room: string, private meId: string, local: MediaStream) {
+  constructor(private room: string, private meId: string, local: MediaStream, private iceServers: RTCIceServer[] = FALLBACK_ICE) {
     this.local = local
     this.offs.push(
       socket.on('call.peers', d => { if (d.room === room) for (const id of d.peers) this.addPeer(id, true) }),
@@ -39,10 +39,13 @@ export class CallSession {
   get participants(): Participant[] {
     return [...this.peers.entries()].map(([userId, p]) => {
       const live = [...p.streams.values()].filter(s => s.getTracks().some(t => t.readyState === 'live'))
+      // The sharer announces the screen stream id; if that message was missed, a second video-only stream is the screen.
+      let screen = live.find(s => s.id === p.screenId) ?? null
+      if (!screen && p.screenId === undefined && live.length > 1) screen = live.find(s => !s.getAudioTracks().length && s.getVideoTracks().length) ?? null
       return {
         userId,
-        stream: live.find(s => s.id !== p.screenId) ?? null,
-        screen: live.find(s => s.id === p.screenId) ?? null,
+        stream: live.find(s => s !== screen) ?? null,
+        screen,
         connection: p.pc.connectionState
       }
     })
@@ -50,8 +53,8 @@ export class CallSession {
 
   private addPeer(userId: string, initiator: boolean) {
     if (userId === this.meId || this.peers.has(userId)) return
-    const pc = new RTCPeerConnection(ICE)
-    const peer = { pc, makingOffer: false, polite: !initiator, streams: new Map<string, MediaStream>(), screenId: null as string | null, pendingIce: [] as RTCIceCandidateInit[] }
+    const pc = new RTCPeerConnection({ iceServers: this.iceServers })
+    const peer = { pc, makingOffer: false, polite: !initiator, streams: new Map<string, MediaStream>(), screenId: undefined as string | null | undefined, pendingIce: [] as RTCIceCandidateInit[] }
     this.peers.set(userId, peer)
 
     for (const track of this.local.getTracks()) pc.addTrack(track, this.local)
@@ -75,6 +78,8 @@ export class CallSession {
     }
     pc.onconnectionstatechange = () => {
       if (pc.connectionState === 'failed') pc.restartIce()
+      // A brief 'disconnected' often heals by itself; if it doesn't, renegotiate the connection path.
+      if (pc.connectionState === 'disconnected') setTimeout(() => { if (pc.connectionState === 'disconnected') pc.restartIce() }, 4000)
       this.onChange()
     }
     pc.onnegotiationneeded = async () => {
@@ -159,6 +164,7 @@ export class CallSession {
     try {
       const display = await navigator.mediaDevices.getDisplayMedia({ video: true })
       const track = display.getVideoTracks()[0]
+      track.contentHint = 'detail' // text and UI stay sharp instead of dropping resolution
       this.screenTrack = track
       this.screenStream = display
       track.onended = () => { this.stopScreen(); this.onChange() }
@@ -166,7 +172,12 @@ export class CallSession {
       this.announceScreen(display.id)
       this.onChange()
       return true
-    } catch {
+    } catch (e) {
+      // In a browser, NotAllowedError means the person closed the picker. In the desktop app there is no picker,
+      // so it means the OS blocked capture (macOS screen-recording permission).
+      if ((e as DOMException).name !== 'NotAllowedError' || window.teamsDesktop) {
+        this.onError('Could not start screen sharing. On a Mac, allow Quence Teams under System Settings, Privacy & Security, Screen Recording, then restart the app.')
+      }
       return false
     }
   }

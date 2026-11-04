@@ -52,6 +52,7 @@ export interface Bootstrap {
 export const api = {
   login: (email: string, password: string) => request<{ token: string; user: User }>('POST', '/api/auth/login', { email, password }),
   register: (name: string, email: string, password: string) => request<{ token: string; user: User }>('POST', '/api/auth/register', { name, email, password }),
+  iceServers: () => request<{ iceServers: RTCIceServer[] }>('GET', '/api/ice'),
   bootstrap: () => request<Bootstrap>('GET', '/api/bootstrap'),
   updateMe: (patch: { title?: string; statusMsg?: string; presence?: string }) => request<User>('PATCH', '/api/me', patch),
 
