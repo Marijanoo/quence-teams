@@ -179,7 +179,7 @@ export const useStore = create<State>((set, get) => ({
       id: 'pending-' + Math.random().toString(36).slice(2), seq: Number.MAX_SAFE_INTEGER, convoId, parentId: opts.parentId ?? null,
       replyTo: q ? { id: q.id, convoId: q.convoId, author: q.author, snippet: q.body.slice(0, 200), deleted: false, hasAttachment: q.attachments.length > 0 } : null,
       kind: 'text', subject: opts.subject ?? '', author: me, body, createdAt: Date.now(), editedAt: null, deleted: false, pinned: false,
-      reactions: [], attachments: [], replyCount: 0, lastReplyAt: null
+      poll: null, reactions: [], attachments: [], replyCount: 0, lastReplyAt: null
     }
     const optimistic = !opts.files?.length
     if (optimistic) set(st => withLocal(st, pending, list => [...list, pending]))

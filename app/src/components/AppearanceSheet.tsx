@@ -1,6 +1,6 @@
 import { useState } from 'react'
 import { X } from 'lucide-react'
-import { ACCENT_PRESETS, DEFAULTS, applyAppearance, loadAppearance, saveAppearance, sanitize, type Appearance } from '../lib/appearance'
+import { ACCENT_PRESETS, SEASON_PRESETS, currentSeason, DEFAULTS, applyAppearance, loadAppearance, saveAppearance, sanitize, type Appearance } from '../lib/appearance'
 import { useStore } from '../lib/store'
 
 function Slider({ label, value, min, max, step, onChange, format }: { label: string; value: number; min: number; max: number; step: number; onChange: (v: number) => void; format?: (v: number) => string }) {
@@ -25,7 +25,7 @@ export function AppearanceSheet() {
     saveAppearance(next)
     return next
   })
-  const activePreset = ACCENT_PRESETS.find(p => Math.abs(p.h - a.accent.h) < 6 && Math.abs(p.c - a.accent.c) < 0.05)
+  const activePreset = a.season ? undefined : ACCENT_PRESETS.find(p => Math.abs(p.h - a.accent.h) < 6 && Math.abs(p.c - a.accent.c) < 0.05)
   const bg = (dl: number) => `oklch(${Math.min(1, Math.max(0, a.bgL + dl * (a.bgL <= 0.5 ? 1 : -1))).toFixed(3)} ${a.bgC} ${a.bgH})`
 
   return (
@@ -43,16 +43,30 @@ export function AppearanceSheet() {
           <div className="sp-presets">
             {ACCENT_PRESETS.map(p => (
               <button key={p.name} title={p.name} aria-label={p.name} aria-pressed={activePreset?.name === p.name}
-                onClick={() => update(prev => ({ ...prev, accent: { l: p.l, c: p.c, h: p.h } }))}>
+                onClick={() => update(prev => ({ ...prev, season: false, accent: { l: p.l, c: p.c, h: p.h } }))}>
                 <i className={activePreset?.name === p.name ? 'on' : ''} style={{ background: `oklch(${p.l} ${p.c} ${p.h})` }} />
                 <span>{p.name}</span>
               </button>
             ))}
           </div>
-          <Slider label="Hue" value={a.accent.h} min={0} max={359} step={1} format={v => `${Math.round(v)}°`} onChange={h => update(p => ({ ...p, accent: { ...p.accent, h } }))} />
-          <Slider label="Intensity" value={a.accent.c} min={0} max={0.3} step={0.005} onChange={c => update(p => ({ ...p, accent: { ...p.accent, c } }))} />
-          <Slider label="Lightness" value={a.accent.l} min={0.35} max={0.9} step={0.01} onChange={l => update(p => ({ ...p, accent: { ...p.accent, l } }))} />
-          <div className="sp-swatch" style={{ background: `oklch(${a.accent.l} ${a.accent.c} ${a.accent.h})` }} />
+          <h4 style={{ marginTop: 12 }}>Seasons</h4>
+          <div className="sp-presets">
+            {SEASON_PRESETS.map(p => (
+              <button key={p.name} title={p.name} aria-label={p.name} aria-pressed={!a.season && activePreset?.name === p.name}
+                onClick={() => update(prev => ({ ...prev, season: false, accent: { l: p.l, c: p.c, h: p.h } }))}>
+                <i className={!a.season && Math.abs(p.h - a.accent.h) < 6 && Math.abs(p.c - a.accent.c) < 0.05 ? 'on' : ''} style={{ background: `oklch(${p.l} ${p.c} ${p.h})` }} />
+                <span>{p.name}</span>
+              </button>
+            ))}
+          </div>
+          <label style={{ display: 'flex', gap: 8, alignItems: 'center', margin: '8px 0' }}>
+            <input type="checkbox" checked={a.season} onChange={e => update(p => ({ ...p, season: e.target.checked }))} />
+            Follow the season (now: {currentSeason().name})
+          </label>
+          <Slider label="Hue" value={a.accent.h} min={0} max={359} step={1} format={v => `${Math.round(v)}°`} onChange={h => update(p => ({ ...p, season: false, accent: { ...p.accent, h } }))} />
+          <Slider label="Intensity" value={a.accent.c} min={0} max={0.3} step={0.005} onChange={c => update(p => ({ ...p, season: false, accent: { ...p.accent, c } }))} />
+          <Slider label="Lightness" value={a.accent.l} min={0.35} max={0.9} step={0.01} onChange={l => update(p => ({ ...p, season: false, accent: { ...p.accent, l } }))} />
+          <div className="sp-swatch" style={{ background: a.season ? `oklch(${currentSeason().l} ${currentSeason().c} ${currentSeason().h})` : `oklch(${a.accent.l} ${a.accent.c} ${a.accent.h})` }} />
         </section>
         <hr />
         <section>

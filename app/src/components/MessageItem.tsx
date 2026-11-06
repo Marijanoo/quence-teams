@@ -1,10 +1,10 @@
 import { useEffect, useState, type MutableRefObject } from 'react'
-import { Bookmark, BookmarkCheck, CornerUpLeft, FileText, MoreHorizontal, Pencil, Pin, PinOff, Smile, SmilePlus, Trash2, Video, MessageSquareReply, Paperclip } from 'lucide-react'
+import { BarChart3, Check, Bookmark, BookmarkCheck, CornerUpLeft, FileText, MoreHorizontal, Pencil, Pin, PinOff, Smile, SmilePlus, Trash2, Video, MessageSquareReply, Paperclip } from 'lucide-react'
 import { api, fileUrl } from '../lib/api'
 import { EMOJIS, QUICK_REACTIONS, emojiOnlyCount, formatBytes, formatTime, mentionsToDisplay, mentionsToRaw, plainText, renderBody } from '../lib/format'
 import { useSettings } from '../lib/settings'
 import { askConfirm, convoName, useStore } from '../lib/store'
-import type { Message } from '../lib/types'
+import type { Message, Poll } from '../lib/types'
 import { Avatar, useClickOutside, useKeepInViewport } from './ui'
 
 
@@ -22,6 +22,34 @@ function ReactionPicker({ onPick, onClose, align = 'left' }: { onPick: (e: strin
             {QUICK_REACTIONS.map(e => <button key={e} onClick={() => { onPick(e); onClose() }} aria-label={`React ${e}`}>{e}</button>)}
             <button onClick={() => setMore(true)} aria-label="More reactions" title="More" style={{ fontSize: 14 }}>•••</button>
           </div>}
+    </div>
+  )
+}
+
+// A poll inside a bubble: click an option to vote, click it again to take the vote back.
+function PollBlock({ msg, poll, meId }: { msg: Message; poll: Poll; meId: string }) {
+  const toast = useStore(s => s.toast)
+  const total = new Set(poll.options.flatMap(o => o.userIds)).size
+  async function vote(optionId: string) {
+    try { await api.vote(msg.id, optionId) } catch (e) { toast((e as Error).message, 'error') }
+  }
+  return (
+    <div className="poll">
+      <div className="poll-q"><BarChart3 size={15} />{msg.body}</div>
+      <div className="poll-hint">{poll.multi ? 'Select all that apply' : 'Select one'}</div>
+      {poll.options.map(o => {
+        const mine = o.userIds.includes(meId)
+        const pct = total ? Math.round((o.userIds.length / total) * 100) : 0
+        return (
+          <button key={o.id} className={`poll-opt${mine ? ' mine' : ''}`} onClick={() => void vote(o.id)} aria-pressed={mine}>
+            <span className="poll-fill" style={{ width: `${pct}%` }} />
+            <span className="poll-check">{mine && <Check size={13} />}</span>
+            <span className="poll-text">{o.text}</span>
+            <span className="poll-count">{o.userIds.length}{total ? ` · ${pct}%` : ''}</span>
+          </button>
+        )
+      })}
+      <div className="poll-hint">{total} {total === 1 ? 'person' : 'people'} voted</div>
     </div>
   )
 }
@@ -148,7 +176,8 @@ export function MessageItem({ msg, compact, inThread, canModerate, onReply, onQu
                     <button className="btn sm" onClick={() => setEditing(false)}>Cancel</button>
                   </div>
                 </div>
-              ) : msg.body && <div className="text">{renderBody(msg.body, users, me.id)}</div>}
+              ) : msg.poll ? <PollBlock msg={msg} poll={msg.poll} meId={me.id} />
+                : msg.body && <div className="text">{renderBody(msg.body, users, me.id)}</div>}
 
               {msg.attachments.length > 0 && (
                 <div className="attachments">

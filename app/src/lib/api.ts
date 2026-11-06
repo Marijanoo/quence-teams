@@ -96,6 +96,9 @@ export const api = {
   edit: (id: string, body: string) => request<Message>('PATCH', `/api/messages/${id}`, { body }),
   remove: (id: string) => request('DELETE', `/api/messages/${id}`),
   pin: (id: string, pinned: boolean) => request('PUT', `/api/messages/${id}/pin`, { pinned }),
+  createPoll: (convoId: string, poll: { question: string; options: string[]; multi: boolean; parentId?: string }) =>
+    request<Message>('POST', `/api/convos/${convoId}/polls`, poll),
+  vote: (id: string, optionId: string) => request('PUT', `/api/messages/${id}/vote`, { optionId }),
   react: (id: string, emoji: string, on: boolean) => request(on ? 'PUT' : 'DELETE', `/api/messages/${id}/reactions/${encodeURIComponent(emoji)}`),
   markRead: (convoId: string) => request('POST', `/api/convos/${convoId}/read`),
   pins: (convoId: string) => request<Message[]>('GET', `/api/convos/${convoId}/pins`),

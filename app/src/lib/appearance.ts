@@ -1,8 +1,8 @@
 // Appearance settings (accent, background, text), stored per device and applied as CSS variables.
 export interface Oklch { l: number; c: number; h: number }
-export interface Appearance { accent: Oklch; bgL: number; bgC: number; bgH: number; fgL: number }
+export interface Appearance { accent: Oklch; bgL: number; bgC: number; bgH: number; fgL: number; season: boolean }
 
-export const DEFAULTS: Appearance = { accent: { l: 0.72, c: 0.19, h: 350 }, bgL: 0.28, bgC: 0.01, bgH: 282, fgL: 0.97 }
+export const DEFAULTS: Appearance = { accent: { l: 0.72, c: 0.19, h: 350 }, bgL: 0.28, bgC: 0.01, bgH: 282, fgL: 0.97, season: false }
 
 export const ACCENT_PRESETS: (Oklch & { name: string })[] = [
   { name: 'Pink', l: 0.72, c: 0.19, h: 350 },
@@ -14,6 +14,18 @@ export const ACCENT_PRESETS: (Oklch & { name: string })[] = [
   { name: 'Violet', l: 0.68, c: 0.2, h: 295 },
   { name: 'Fuchsia', l: 0.7, c: 0.25, h: 325 },
 ]
+
+// Northern hemisphere seasons; "follow the season" swaps the accent as the months change.
+export const SEASON_PRESETS: (Oklch & { name: string })[] = [
+  { name: 'Winter', l: 0.76, c: 0.1, h: 225 },
+  { name: 'Spring', l: 0.78, c: 0.17, h: 145 },
+  { name: 'Summer', l: 0.82, c: 0.17, h: 85 },
+  { name: 'Autumn', l: 0.7, c: 0.17, h: 45 }
+]
+export function currentSeason(date = new Date()) {
+  const m = date.getMonth() // 0 = January
+  return SEASON_PRESETS[m === 11 || m < 2 ? 0 : m < 5 ? 1 : m < 8 ? 2 : 3]
+}
 
 const KEY = 'quence-teams-appearance'
 const fmt = (c: Oklch) => `oklch(${c.l.toFixed(3)} ${c.c.toFixed(3)} ${Math.round(c.h)})`
@@ -40,7 +52,8 @@ export function saveAppearance(a: Appearance) {
 }
 
 export function applyAppearance(input: Appearance) {
-  const a = sanitize(input)
+  const base = sanitize(input)
+  const a = base.season ? sanitize({ ...base, accent: currentSeason() }) : base
   const root = document.documentElement.style
   const bg = (dl: number): string => fmt({ l: clamp(a.bgL + dl, 0, 1), c: a.bgC, h: a.bgH })
   const dark = a.bgL <= 0.5

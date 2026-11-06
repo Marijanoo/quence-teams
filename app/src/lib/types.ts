@@ -3,13 +3,16 @@ export type Presence = 'available' | 'busy' | 'dnd' | 'away' | 'offline'
 export interface User { id: string; name: string; email: string; title: string; statusMsg: string; color: number; avatar: number }
 export interface Quote { id: string; convoId: string; author: User | null; snippet: string; deleted: boolean; hasAttachment: boolean }
 export interface Reaction { emoji: string; userIds: string[] }
+export interface PollOption { id: string; text: string; userIds: string[] }
+export interface Poll { multi: boolean; options: PollOption[] }
 export interface Attachment { id: string; name: string; mime: string; size: number }
 
 export interface Message {
   id: string; seq: number; convoId: string; parentId: string | null
   replyTo: Quote | null
-  kind: 'text' | 'call'; subject: string; author: User | null; body: string
+  kind: 'text' | 'call' | 'poll'; subject: string; author: User | null; body: string
   createdAt: number; editedAt: number | null; deleted: boolean; pinned: boolean
+  poll: Poll | null
   reactions: Reaction[]; attachments: Attachment[]; replyCount: number; lastReplyAt: number | null
 }
 

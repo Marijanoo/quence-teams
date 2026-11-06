@@ -1,13 +1,21 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
-import { AtSign, Paperclip, Send, Smile, X, Type } from 'lucide-react'
+import { AtSign, BarChart3, Paperclip, Send, Smile, X, Type } from 'lucide-react'
 import { EMOJIS, formatBytes, mentionsToRaw, plainText } from '../lib/format'
 import { useStore } from '../lib/store'
 import { socket } from '../lib/socket'
 import { getSettings, useSettings } from '../lib/settings'
 import type { Message, User } from '../lib/types'
 import { Avatar, useClickOutside } from './ui'
+import { PollDialog } from './PollDialog'
 
 const MAX_FILE = 25 * 1024 * 1024
+
+// Typed commands. The text after the command is passed on as the argument.
+const COMMANDS = [
+  { name: 'poll', hint: 'Question | Option 1 | Option 2', help: 'Ask the room to vote' },
+  { name: 'shrug', hint: 'message', help: 'Add ¯\\_(ツ)_/¯ to a message' },
+  { name: 'me', hint: 'does something', help: 'Say something about yourself in italics' }
+]
 
 interface ComposerProps {
   convoId: string; parentId?: string; placeholder: string; allowSubject?: boolean; onSent?: () => void; members: User[]
@@ -33,6 +41,8 @@ function ComposerInner({ convoId, parentId, placeholder, allowSubject, onSent, m
   const [mention, setMention] = useState<{ start: number; query: string } | null>(null)
   const [mentionIdx, setMentionIdx] = useState(0)
   const [dragging, setDragging] = useState(false)
+  const [poll, setPoll] = useState<{ question: string; options?: string[] } | null>(null)
+  const [slashIdx, setSlashIdx] = useState(0)
   const area = useRef<HTMLTextAreaElement>(null)
   const fileInput = useRef<HTMLInputElement>(null)
   const lastTyping = useRef(0)
@@ -60,8 +70,18 @@ function ComposerInner({ convoId, parentId, placeholder, allowSubject, onSent, m
     return list.slice(0, 6)
   }, [mention, members, me.id])
 
+  const slash = /^\/([a-z]*)$/.exec(text)
+  const commandHints = slash ? COMMANDS.filter(c => c.name.startsWith(slash[1])) : []
+
+  function pickCommand(name: string) {
+    setText(`/${name} `)
+    setSlashIdx(0)
+    requestAnimationFrame(() => area.current?.focus())
+  }
+
   function onChange(value: string, caret: number) {
     setText(value)
+    setSlashIdx(0)
     const before = value.slice(0, caret)
     const m = /(^|\s)@([^\s@]{0,30})$/.exec(before)
     setMention(m ? { start: caret - m[2].length - 1, query: m[2] } : null)
@@ -92,7 +112,20 @@ function ComposerInner({ convoId, parentId, placeholder, allowSubject, onSent, m
 
   async function send() {
     if (sending || (!text.trim() && !files.length)) return
-    const draft = { text, subject, showSubject, files, quote }
+    let outgoing = text
+    const cmd = /^\/(poll|shrug|me)(?:\s+([\s\S]*))?$/.exec(text.trim())
+    if (cmd) {
+      const arg = (cmd[2] ?? '').trim()
+      if (cmd[1] === 'poll') {
+        const [question, ...options] = arg.split('|').map(x => x.trim())
+        setText(''); setPoll({ question: question ?? '', options: options.filter(Boolean).length ? options.filter(Boolean) : undefined })
+        return
+      }
+      if (cmd[1] === 'shrug') outgoing = `${arg ? arg + ' ' : ''}¯\\_(ツ)_/¯`
+      else if (arg) outgoing = `*${me.name} ${arg.replace(/\*/g, '')}*`
+      else return
+    }
+    const draft = { text: outgoing, subject, showSubject, files, quote }
     const hasFiles = files.length > 0
     // Clear right away so the box is ready for the next message; put everything back if the send fails.
     setText(''); setSubject(''); setShowSubject(false); setFiles([])
@@ -115,6 +148,17 @@ function ComposerInner({ convoId, parentId, placeholder, allowSubject, onSent, m
       onDragLeave={e => { if (e.currentTarget === e.target) setDragging(false) }}
       onDrop={e => { e.preventDefault(); setDragging(false); if (e.dataTransfer.files.length) addFiles(e.dataTransfer.files) }}>
       {dragging && <div className="drop-hint">Drop files to attach</div>}
+      {poll && <PollDialog convoId={convoId} parentId={parentId} initialQuestion={poll.question} initialOptions={poll.options} onClose={() => setPoll(null)} />}
+      {commandHints.length > 0 && !mention && (
+        <div className="popup mention-pop" role="listbox" aria-label="Commands">
+          {commandHints.map((c, i) => (
+            <button key={c.name} className={`pick-row${i === slashIdx ? ' picked' : ''}`} role="option" aria-selected={i === slashIdx}
+              onMouseDown={e => { e.preventDefault(); pickCommand(c.name) }}>
+              <strong>/{c.name}</strong><span className="slash-hint">{c.help}</span>
+            </button>
+          ))}
+        </div>
+      )}
       {mention && candidates.length > 0 && (
         <div className="popup mention-pop" role="listbox">
           {candidates.map((c, i) => (
@@ -143,6 +187,12 @@ function ComposerInner({ convoId, parentId, placeholder, allowSubject, onSent, m
           spellCheck={cfg.spellcheck}
           onChange={e => onChange(e.target.value, e.target.selectionStart)}
           onKeyDown={e => {
+            if (commandHints.length && !mention) {
+              if (e.key === 'ArrowDown') { e.preventDefault(); setSlashIdx(i => (i + 1) % commandHints.length); return }
+              if (e.key === 'ArrowUp') { e.preventDefault(); setSlashIdx(i => (i - 1 + commandHints.length) % commandHints.length); return }
+              if ((e.key === 'Tab' || e.key === 'Enter') && text !== `/${commandHints[slashIdx].name}`) { e.preventDefault(); pickCommand(commandHints[slashIdx].name); return }
+              if (e.key === 'Tab') { e.preventDefault(); pickCommand(commandHints[slashIdx].name); return }
+            }
             if (mention && candidates.length) {
               if (e.key === 'ArrowDown') { e.preventDefault(); setMentionIdx(i => (i + 1) % candidates.length); return }
               if (e.key === 'ArrowUp') { e.preventDefault(); setMentionIdx(i => (i - 1 + candidates.length) % candidates.length); return }
@@ -172,6 +222,7 @@ function ComposerInner({ convoId, parentId, placeholder, allowSubject, onSent, m
               </div>
             )}
           </div>
+          <button className="icon-btn" title="Create a poll" onClick={() => setPoll({ question: '' })}><BarChart3 size={17} /></button>
           <button className="icon-btn" title="Attach files" onClick={() => fileInput.current?.click()}><Paperclip size={17} /></button>
           <input ref={fileInput} type="file" multiple hidden onChange={e => { if (e.target.files) addFiles(e.target.files); e.target.value = '' }} />
           <div className="grow" />
