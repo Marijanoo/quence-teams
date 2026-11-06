@@ -3,6 +3,7 @@ import { AtSign, Paperclip, Send, Smile, X, Type } from 'lucide-react'
 import { EMOJIS, formatBytes, mentionsToRaw, plainText } from '../lib/format'
 import { useStore } from '../lib/store'
 import { socket } from '../lib/socket'
+import { getSettings, useSettings } from '../lib/settings'
 import type { Message, User } from '../lib/types'
 import { Avatar, useClickOutside } from './ui'
 
@@ -22,6 +23,7 @@ function ComposerInner({ convoId, parentId, placeholder, allowSubject, onSent, m
   const me = useStore(s => s.me)!
   const toast = useStore(s => s.toast)
   const users = useStore(s => s.users)
+  const cfg = useSettings()
   const [text, setText] = useState(() => useStore.getState().drafts[parentId ? `${convoId}#${parentId}` : convoId]?.text ?? '')
   const [subject, setSubject] = useState('')
   const [showSubject, setShowSubject] = useState(false)
@@ -64,7 +66,7 @@ function ComposerInner({ convoId, parentId, placeholder, allowSubject, onSent, m
     const m = /(^|\s)@([^\s@]{0,30})$/.exec(before)
     setMention(m ? { start: caret - m[2].length - 1, query: m[2] } : null)
     setMentionIdx(0)
-    if (value && Date.now() - lastTyping.current > 3000) {
+    if (value && getSettings().sendTyping && Date.now() - lastTyping.current > 3000) {
       lastTyping.current = Date.now()
       socket.send('typing', { convoId, parentId })
     }
@@ -138,6 +140,7 @@ function ComposerInner({ convoId, parentId, placeholder, allowSubject, onSent, m
           ref={area} rows={1} value={text}
           placeholder={placeholder}
           aria-label={placeholder}
+          spellCheck={cfg.spellcheck}
           onChange={e => onChange(e.target.value, e.target.selectionStart)}
           onKeyDown={e => {
             if (mention && candidates.length) {
@@ -146,7 +149,7 @@ function ComposerInner({ convoId, parentId, placeholder, allowSubject, onSent, m
               if (e.key === 'Enter' || e.key === 'Tab') { e.preventDefault(); insertMention(candidates[mentionIdx]); return }
               if (e.key === 'Escape') { setMention(null); return }
             }
-            if (e.key === 'Enter' && !e.shiftKey && !e.nativeEvent.isComposing) { e.preventDefault(); void send() }
+            if (e.key === 'Enter' && !e.nativeEvent.isComposing && (cfg.enterToSend ? !e.shiftKey : e.ctrlKey || e.metaKey)) { e.preventDefault(); void send() }
           }}
           onPaste={e => { if (e.clipboardData.files.length) { e.preventDefault(); addFiles(e.clipboardData.files) } }}
         />

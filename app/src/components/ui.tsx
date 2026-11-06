@@ -1,17 +1,26 @@
 import { useEffect, useLayoutEffect, useRef, useState, type ReactNode } from 'react'
-import { X } from 'lucide-react'
+import { Check, X } from 'lucide-react'
 import { avatarColor, initials } from '../lib/format'
+import { avatarUrl } from '../lib/api'
 import { useStore } from '../lib/store'
 import type { Presence, User } from '../lib/types'
 
 export function Avatar({ user, size = 36, presence = false }: { user?: User | null; size?: number; presence?: boolean }) {
   const p = useStore(s => (user ? s.presence[user.id] : undefined)) ?? 'offline'
+  const src = user?.avatar ? avatarUrl(user.id, user.avatar) : ''
   return (
     <div className="avatar" style={{ width: size, height: size, background: avatarColor(user ?? undefined), fontSize: size * 0.38 }} aria-hidden>
-      {initials(user?.name ?? '?')}
+      {src ? <AvatarImage key={src} src={src} name={user?.name ?? '?'} /> : initials(user?.name ?? '?')}
       {presence && <span className={`presence ${p}`} style={{ width: Math.max(9, size * 0.3), height: Math.max(9, size * 0.3) }} title={presenceLabel(p)} />}
     </div>
   )
+}
+
+// The picture, falling back to initials if it cannot be loaded.
+function AvatarImage({ src, name }: { src: string; name: string }) {
+  const [broken, setBroken] = useState(false)
+  if (broken) return <>{initials(name)}</>
+  return <img className="avatar-img" src={src} alt="" draggable={false} onError={() => setBroken(true)} />
 }
 
 export function presenceLabel(p: Presence | string): string {
@@ -155,5 +164,44 @@ export function ConfirmHost() {
         <button className={`btn ${c.danger ? 'danger' : 'primary'}`} onClick={() => done(true)} autoFocus>{c.confirmLabel}</button>
       </div>
     </Dialog>
+  )
+}
+
+export interface CtxItem { label: string; icon?: ReactNode; onClick: () => void; danger?: boolean; checked?: boolean; hidden?: boolean; divider?: boolean }
+
+// Right-click menu that opens at the pointer and stays inside the window.
+export function ContextMenu({ x, y, items, onClose }: { x: number; y: number; items: CtxItem[]; onClose: () => void }) {
+  const ref = useRef<HTMLDivElement>(null)
+  useLayoutEffect(() => {
+    const el = ref.current
+    if (!el) return
+    const r = el.getBoundingClientRect()
+    el.style.left = `${Math.max(6, Math.min(x, window.innerWidth - r.width - 6))}px`
+    el.style.top = `${Math.max(6, Math.min(y, window.innerHeight - r.height - 6))}px`
+  }, [x, y])
+  useEffect(() => {
+    const down = (e: MouseEvent) => { if (!ref.current?.contains(e.target as Node)) onClose() }
+    const key = (e: KeyboardEvent) => { if (e.key === 'Escape') onClose() }
+    document.addEventListener('mousedown', down, true)
+    document.addEventListener('contextmenu', down, true)
+    window.addEventListener('keydown', key)
+    window.addEventListener('blur', onClose)
+    window.addEventListener('resize', onClose)
+    return () => {
+      document.removeEventListener('mousedown', down, true)
+      document.removeEventListener('contextmenu', down, true)
+      window.removeEventListener('keydown', key)
+      window.removeEventListener('blur', onClose)
+      window.removeEventListener('resize', onClose)
+    }
+  }, [onClose])
+  return (
+    <div ref={ref} className="menu ctx" style={{ position: 'fixed', left: x, top: y }} role="menu" onContextMenu={e => e.preventDefault()}>
+      {items.filter(i => !i.hidden).map((i, idx) => i.divider
+        ? <hr key={idx} />
+        : <button key={idx} role="menuitem" className={i.danger ? 'danger' : ''} onClick={() => { onClose(); i.onClick() }}>
+            <span className="ctx-ico">{i.icon}</span><span style={{ flex: 1 }}>{i.label}</span>{i.checked && <Check size={14} />}
+          </button>)}
+    </div>
   )
 }

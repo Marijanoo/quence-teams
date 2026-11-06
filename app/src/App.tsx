@@ -14,15 +14,19 @@ import { Calendar } from './components/Calendar'
 import { CallView } from './components/CallView'
 import { Search } from './components/Search'
 import { Avatar, ConfirmHost } from './components/ui'
+import { ProfileMenu } from './components/ProfileMenu'
+import { AppearanceSheet } from './components/AppearanceSheet'
+import { SettingsDialog } from './components/SettingsDialog'
+import { beep, useSettings } from './lib/settings'
 import { TitleBar } from './components/TitleBar'
 import { BottomBar } from './components/BottomBar'
 import { CallDetail, CallsSidebar, NewCallDialog } from './components/CallsPanel'
-import { ChatMembersDialog, MeetingDialog, NewChannelDialog, NewChatDialog, NewMeetingDialog, NewTeamDialog, ProfileDialog, TeamSettingsDialog } from './components/Dialogs'
+import { ChatMembersDialog, MeetingDialog, NewChannelDialog, NewChatDialog, NewMeetingDialog, NewTeamDialog, TeamSettingsDialog } from './components/Dialogs'
 
 type DialogState =
   | { type: 'newChat' } | { type: 'newTeam' } | { type: 'newChannel'; team: Team }
   | { type: 'team'; teamId: string } | { type: 'chatMembers'; chatId: string }
-  | { type: 'newCall' } | { type: 'profile' } | { type: 'newMeeting'; start?: number } | { type: 'meeting'; meeting: Meeting }
+  | { type: 'newCall' } | { type: 'newMeeting'; start?: number; end?: number } | { type: 'meeting'; meeting: Meeting } | { type: 'editMeeting'; meeting: Meeting }
 
 const RAIL: { id: View; label: string; icon: typeof Bell }[] = [
   { id: 'activity', label: 'Activity', icon: Bell },
@@ -47,7 +51,6 @@ export default function App() {
 }
 
 function Shell() {
-  const me = useStore(s => s.me)!
   const view = useStore(s => s.view)
   const setView = useStore(s => s.setView)
   const selection = useStore(s => s.selection)
@@ -97,21 +100,23 @@ function Shell() {
     window.teamsDesktop?.setUnread(n)
   }, [chatUnread, channelMentions])
 
-  // Meeting reminders five minutes before the start.
+  // Meeting reminders shortly before the start (set in Settings).
   const meetings = useStore(s => s.meetings)
+  const remind = useSettings().meetingReminder
   useEffect(() => {
+    if (!remind) return
     const fired = new Set<string>()
     const t = setInterval(() => {
       for (const m of meetings) {
         const until = m.startsAt - Date.now()
-        if (until > 0 && until <= 5 * 60_000 && !fired.has(m.id)) {
+        if (until > 0 && until <= remind * 60_000 && !fired.has(m.id)) {
           fired.add(m.id)
           toast(`“${m.title}” starts in ${Math.max(1, Math.round(until / 60_000))} min`)
         }
       }
     }, 20_000)
     return () => clearInterval(t)
-  }, [meetings, toast])
+  }, [meetings, toast, remind])
 
   const showConvo = view === 'chat' && !quickView && !!selection
   const showQuick = view === 'chat' && !!quickView
@@ -119,14 +124,11 @@ function Shell() {
 
   return (
     <div className="shell">
-      <TitleBar right={
-        <button className="profile-btn" onClick={() => setDialog({ type: 'profile' })} aria-label="Your profile" title={me.name}>
-          <Avatar user={me} size={20} presence /><span>{me.name}</span>
-        </button>
-      }>
+      <TitleBar right={<ProfileMenu />}>
         <Search />
       </TitleBar>
       {!online && <div className="offline-banner" role="status">Reconnecting…</div>}
+      <div className="work">
       <div className={`body${showConvo || showQuick ? ' convo-open' : ''}`}>
         <nav className="rail" aria-label="Main">
           {RAIL.map(r => (
@@ -147,7 +149,7 @@ function Shell() {
         {view === 'calls'
           ? <CallDetail call={selectedCall} />
           : view === 'calendar'
-          ? <Calendar onNew={start => setDialog({ type: 'newMeeting', start })} onOpen={meeting => setDialog({ type: 'meeting', meeting })} />
+          ? <Calendar onNew={(start, end) => setDialog({ type: 'newMeeting', start, end })} onOpen={meeting => setDialog({ type: 'meeting', meeting })} onEdit={meeting => setDialog({ type: 'editMeeting', meeting })} />
           : showQuick
             ? <QuickViewPane />
           : showConvo
@@ -160,6 +162,8 @@ function Shell() {
 
         {threadId && showConvo && <ThreadPanel key={threadId} />}
       </div>
+      <AppearanceSheet />
+      </div>
       <BottomBar />
 
       {dialog?.type === 'newCall' && <NewCallDialog onClose={() => setDialog(null)} />}
@@ -168,9 +172,10 @@ function Shell() {
       {dialog?.type === 'newChannel' && <NewChannelDialog team={dialog.team} onClose={() => setDialog(null)} />}
       {dialog?.type === 'team' && <TeamSettingsDialog teamId={dialog.teamId} onClose={() => setDialog(null)} />}
       {dialog?.type === 'chatMembers' && <ChatMembersDialog chatId={dialog.chatId} onClose={() => setDialog(null)} />}
-      {dialog?.type === 'profile' && <ProfileDialog onClose={() => setDialog(null)} />}
-      {dialog?.type === 'newMeeting' && <NewMeetingDialog initialStart={dialog.start} onClose={() => setDialog(null)} />}
-      {dialog?.type === 'meeting' && <MeetingDialog meeting={dialog.meeting} onClose={() => setDialog(null)} />}
+      {dialog?.type === 'newMeeting' && <NewMeetingDialog initialStart={dialog.start} initialEnd={dialog.end} onClose={() => setDialog(null)} />}
+      {dialog?.type === 'editMeeting' && <NewMeetingDialog meeting={dialog.meeting} onClose={() => setDialog(null)} />}
+      {dialog?.type === 'meeting' && <MeetingDialog meeting={dialog.meeting} onEdit={() => setDialog({ type: 'editMeeting', meeting: dialog.meeting })} onClose={() => setDialog(null)} />}
+      <SettingsDialog />
 
       {activeCall && <CallView key={activeCall.room} />}
       <IncomingCall />
@@ -193,6 +198,14 @@ function IncomingCall() {
     const t = setTimeout(dismiss, 45_000)
     return () => clearTimeout(t)
   }, [incoming, dismiss])
+
+  const ring = useSettings().soundCall && !!incoming && !activeCall
+  useEffect(() => {
+    if (!ring) return
+    beep('ring')
+    const t = setInterval(() => beep('ring'), 2200)
+    return () => clearInterval(t)
+  }, [ring])
 
   if (!incoming || activeCall) return null
   const from = users[incoming.from.id] ?? incoming.from

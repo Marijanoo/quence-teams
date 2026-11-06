@@ -3,8 +3,9 @@ import { Crown, LogOut, Trash2, UserMinus, UserPlus } from 'lucide-react'
 import { api } from '../lib/api'
 import { askConfirm, chatTitle, useStore } from '../lib/store'
 import type { Meeting, Team, TeamDetail } from '../lib/types'
-import { Avatar, Dialog, PeoplePicker, presenceLabel } from './ui'
+import { Avatar, Dialog, PeoplePicker } from './ui'
 import { formatTime } from '../lib/format'
+import { useSettings } from '../lib/settings'
 
 export function NewChatDialog({ onClose }: { onClose: () => void }) {
   const [picked, setPicked] = useState<string[]>([])
@@ -205,84 +206,47 @@ export function ChatMembersDialog({ chatId, onClose }: { chatId: string; onClose
   )
 }
 
-export function ProfileDialog({ onClose }: { onClose: () => void }) {
-  const me = useStore(s => s.me)!
-  const pref = useStore(s => s.presencePref)
-  const signOut = useStore(s => s.signOut)
-  const toast = useStore(s => s.toast)
-  const [title, setTitle] = useState(me.title)
-  const [statusMsg, setStatusMsg] = useState(me.statusMsg)
-  const [presence, setPresence] = useState(pref)
-  const [busy, setBusy] = useState(false)
-
-  async function save() {
-    setBusy(true)
-    try {
-      const u = await api.updateMe({ title, statusMsg, presence })
-      useStore.setState(s => ({ me: u, presencePref: presence, users: { ...s.users, [u.id]: u } }))
-      onClose()
-    } catch (e) { toast((e as Error).message, 'error'); setBusy(false) }
-  }
-
-  return (
-    <Dialog title="Your profile" onClose={onClose}>
-      <div style={{ display: 'flex', gap: 14, alignItems: 'center' }}>
-        <Avatar user={me} size={56} presence />
-        <div><div style={{ fontWeight: 700, fontSize: 16 }}>{me.name}</div><div className="muted">{me.email}</div></div>
-      </div>
-      <label className="field">Status
-        <select className="input" value={presence} onChange={e => setPresence(e.target.value as typeof presence)}>
-          {(['available', 'busy', 'dnd', 'away', 'offline'] as const).map(p => <option key={p} value={p}>{p === 'offline' ? 'Appear offline' : presenceLabel(p)}</option>)}
-        </select>
-      </label>
-      <label className="field">Status message
-        <input className="input" value={statusMsg} maxLength={120} placeholder="What are you up to?" onChange={e => setStatusMsg(e.target.value)} />
-      </label>
-      <label className="field">Job title
-        <input className="input" value={title} maxLength={80} onChange={e => setTitle(e.target.value)} />
-      </label>
-      <div className="actions split">
-        <button className="btn danger" onClick={() => { onClose(); signOut() }}><LogOut size={15} /> Sign out</button>
-        <div style={{ display: 'flex', gap: 8 }}>
-          <button className="btn" onClick={onClose}>Cancel</button>
-          <button className="btn primary" onClick={save} disabled={busy}>Save</button>
-        </div>
-      </div>
-    </Dialog>
-  )
-}
-
 const pad = (n: number) => String(n).padStart(2, '0')
 const toLocalInput = (t: number) => { const d = new Date(t); return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}` }
 
-export function NewMeetingDialog({ initialStart, onClose }: { initialStart?: number; onClose: () => void }) {
+export function NewMeetingDialog({ initialStart, initialEnd, meeting, onClose }: { initialStart?: number; initialEnd?: number; meeting?: Meeting; onClose: () => void }) {
   const toast = useStore(s => s.toast)
-  const [title, setTitle] = useState('')
-  const [description, setDescription] = useState('')
-  const start0 = initialStart ?? Math.ceil((Date.now() + 15 * 60_000) / (30 * 60_000)) * 30 * 60_000
+  const meId = useStore(s => s.me!.id)
+  const defaultLength = useSettings().defaultLength
+  const [title, setTitle] = useState(meeting?.title ?? '')
+  const [description, setDescription] = useState(meeting?.description ?? '')
+  const start0 = meeting?.startsAt ?? initialStart ?? Math.ceil((Date.now() + 15 * 60_000) / (30 * 60_000)) * 30 * 60_000
   const [start, setStart] = useState(toLocalInput(start0))
-  const [end, setEnd] = useState(toLocalInput(start0 + 30 * 60_000))
-  const [attendees, setAttendees] = useState<string[]>([])
+  const [end, setEnd] = useState(toLocalInput(meeting?.endsAt ?? initialEnd ?? start0 + defaultLength * 60_000))
+  const [attendees, setAttendees] = useState<string[]>(() => meeting ? meeting.attendees.filter(a => a.user.id !== meId).map(a => a.user.id) : [])
   const [busy, setBusy] = useState(false)
 
-  async function create() {
+  async function submit() {
     const s = new Date(start).getTime(), e = new Date(end).getTime()
     if (!(e > s)) return toast('The meeting must end after it starts', 'error')
     setBusy(true)
     try {
-      const m = await api.createMeeting({ title, description, startsAt: s, endsAt: e, attendeeIds: attendees })
+      const m = meeting
+        ? await api.updateMeeting(meeting.id, { title, description, startsAt: s, endsAt: e, attendeeIds: attendees })
+        : await api.createMeeting({ title, description, startsAt: s, endsAt: e, attendeeIds: attendees })
       useStore.setState(st => ({ meetings: [...st.meetings.filter(x => x.id !== m.id), m].sort((a, b) => a.startsAt - b.startsAt) }))
       onClose()
     } catch (err) { toast((err as Error).message, 'error'); setBusy(false) }
   }
 
   return (
-    <Dialog title="New meeting" onClose={onClose} wide>
+    <Dialog title={meeting ? 'Edit meeting' : 'New meeting'} onClose={onClose} wide>
       <label className="field">Title
         <input className="input" value={title} maxLength={120} onChange={e => setTitle(e.target.value)} autoFocus />
       </label>
       <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10 }}>
-        <label className="field">Starts<input className="input" type="datetime-local" value={start} onChange={e => { setStart(e.target.value); const t = new Date(e.target.value).getTime(); if (t) setEnd(toLocalInput(t + 30 * 60_000)) }} /></label>
+        <label className="field">Starts<input className="input" type="datetime-local" value={start} onChange={e => {
+          // Moving the start keeps the length of the meeting.
+          const was = new Date(start).getTime(), len = new Date(end).getTime() - was
+          setStart(e.target.value)
+          const t = new Date(e.target.value).getTime()
+          if (t) setEnd(toLocalInput(t + (len > 0 ? len : defaultLength * 60_000)))
+        }} /></label>
         <label className="field">Ends<input className="input" type="datetime-local" value={end} onChange={e => setEnd(e.target.value)} /></label>
       </div>
       <label className="field">Details (optional)
@@ -292,13 +256,13 @@ export function NewMeetingDialog({ initialStart, onClose }: { initialStart?: num
       <PeoplePicker selected={attendees} onChange={setAttendees} />
       <div className="actions">
         <button className="btn" onClick={onClose}>Cancel</button>
-        <button className="btn primary" disabled={!title.trim() || busy} onClick={create}>Schedule</button>
+        <button className="btn primary" disabled={!title.trim() || busy} onClick={submit}>{meeting ? 'Save' : 'Schedule'}</button>
       </div>
     </Dialog>
   )
 }
 
-export function MeetingDialog({ meeting, onClose }: { meeting: Meeting; onClose: () => void }) {
+export function MeetingDialog({ meeting, onClose, onEdit }: { meeting: Meeting; onClose: () => void; onEdit?: () => void }) {
   const me = useStore(s => s.me)!
   const toast = useStore(s => s.toast)
   const joinCall = useStore(s => s.joinCall)
@@ -325,6 +289,7 @@ export function MeetingDialog({ meeting, onClose }: { meeting: Meeting; onClose:
         ))}
       </div>
       <div className="actions" style={{ flexWrap: 'wrap' }}>
+        {isOrganizer && onEdit && <button className="btn" onClick={onEdit}>Edit</button>}
         {isOrganizer && <button className="btn danger" onClick={async () => { if (await askConfirm({ title: 'Cancel this meeting?', message: 'It will be removed from everyone\'s calendar.', confirmLabel: 'Cancel meeting', danger: true })) void api.deleteMeeting(meeting.id).then(() => { useStore.setState(s => ({ meetings: s.meetings.filter(m => m.id !== meeting.id) })); onClose() }).catch(e => toast(e.message, 'error')) }}>Cancel meeting</button>}
         {mine && !isOrganizer && (
           <>

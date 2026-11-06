@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
+import { audioConstraints, getSettings, useSettings } from '../lib/settings'
 import { Camera, CameraOff, Mic, MicOff, MonitorUp, PhoneOff, Users } from 'lucide-react'
 import { api } from '../lib/api'
 import { CallSession, type Participant } from '../lib/call'
@@ -8,6 +9,12 @@ import { Avatar } from './ui'
 function VideoTile({ stream, muted, mirror, screen }: { stream: MediaStream | null; muted?: boolean; mirror?: boolean; screen?: boolean }) {
   const ref = useRef<HTMLVideoElement>(null)
   useEffect(() => { if (ref.current && ref.current.srcObject !== stream) ref.current.srcObject = stream }, [stream])
+  // Play through the speaker picked in Settings (where the browser supports choosing one).
+  const speaker = useSettings().speakerId
+  useEffect(() => {
+    const el = ref.current as (HTMLVideoElement & { setSinkId?: (id: string) => Promise<void> }) | null
+    if (el?.setSinkId && !muted) void el.setSinkId(speaker || '').catch(() => {})
+  }, [speaker, muted])
   // A shared screen only sends frames when something changes, so its track can stay "muted" while the picture is static.
   const hasVideo = !!stream?.getVideoTracks().some(t => t.readyState === 'live' && t.enabled && (screen || !t.muted))
   return (
@@ -68,7 +75,7 @@ export function CallView() {
   const toast = useStore(s => s.toast)
   const [session, setSession] = useState<CallSession | null>(null)
   const [, force] = useState(0)
-  const [mic, setMic] = useState(true)
+  const [mic, setMic] = useState(() => !getSettings().joinMuted)
   const [cam, setCam] = useState(false)
   const [error, setError] = useState('')
 
@@ -78,7 +85,8 @@ export function CallView() {
     ;(async () => {
       let stream: MediaStream
       try {
-        stream = await navigator.mediaDevices.getUserMedia({ audio: { echoCancellation: true, noiseSuppression: true }, video: false })
+        stream = await navigator.mediaDevices.getUserMedia({ audio: audioConstraints(), video: false })
+        if (getSettings().joinMuted) stream.getAudioTracks().forEach(t => { t.enabled = false })
       } catch {
         // Join as a listener when there is no microphone or permission was denied.
         stream = new MediaStream()

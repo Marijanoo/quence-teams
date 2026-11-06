@@ -1,5 +1,6 @@
 import type { ReactNode } from 'react'
 import type { User } from './types'
+import { getSettings } from './settings'
 
 const AVATAR_COLORS = ['#7cc4a4', '#8fb4ee', '#c9a0e8', '#ef8f8f', '#e8a56c', '#6fc7d4', '#a7c96a']
 export const avatarColor = (u: Pick<User, 'color'> | undefined) => AVATAR_COLORS[(u?.color ?? 0) % AVATAR_COLORS.length]
@@ -10,11 +11,21 @@ export function initials(name: string): string {
   return (parts[0][0] + (parts.length > 1 ? parts[parts.length - 1][0] : '')).toUpperCase()
 }
 
-const timeFmt = new Intl.DateTimeFormat(undefined, { hour: 'numeric', minute: '2-digit' })
+let timeFmtKey = ''
+let timeFmt = new Intl.DateTimeFormat(undefined, { hour: 'numeric', minute: '2-digit' })
+function timeFormatter() {
+  const h = getSettings().hour12
+  if (h !== timeFmtKey) {
+    timeFmtKey = h
+    timeFmt = new Intl.DateTimeFormat(undefined, { hour: 'numeric', minute: '2-digit', ...(h === 'auto' ? {} : { hour12: h === '12' }) })
+  }
+  return timeFmt
+}
 const dayFmt = new Intl.DateTimeFormat(undefined, { weekday: 'long', month: 'long', day: 'numeric' })
 const shortFmt = new Intl.DateTimeFormat(undefined, { month: 'short', day: 'numeric' })
 
-export const formatTime = (t: number) => timeFmt.format(t)
+export const formatTime = (t: number) => timeFormatter().format(t)
+export const formatHour = (h: number) => new Intl.DateTimeFormat(undefined, { hour: 'numeric', ...(getSettings().hour12 === 'auto' ? {} : { hour12: getSettings().hour12 === '12' }) }).format(new Date(2000, 0, 1, h))
 export const sameDay = (a: number, b: number) => new Date(a).toDateString() === new Date(b).toDateString()
 
 export function formatDay(t: number): string {
@@ -91,7 +102,11 @@ export function renderBody(body: string, users: Record<string, User>, meId?: str
   })
 }
 
-export const EMOJIS = ['👍', '❤️', '😂', '😮', '😢', '🎉', '🔥', '👀', '✅', '🙏', '💯', '🚀']
+// The six reactions Teams offers on hover, then a bigger set for the picker and the composer.
+export const QUICK_REACTIONS = ['👍', '❤️', '😂', '😮', '😢', '😠']
+export const EMOJIS = [...QUICK_REACTIONS,
+  '🎉', '🔥', '👀', '✅', '🙏', '💯', '🚀', '😀', '😁', '😅', '🤣', '😊', '😍', '😘', '😎', '🤔', '😴', '😭', '🙌', '👏', '💪', '🤝', '👌', '✌️',
+  '🤞', '👋', '🤷', '🙈', '💔', '💙', '💚', '💛', '💜', '⭐', '✨', '🌈', '☕', '🍕', '🎂', '🎁', '📌', '📎', '💡', '⚠️', '❌', '✔️', '⏰', '📅', '💬']
 
 // Mentions are stored as <@userId> tokens, but people type and edit them as @Name.
 export function mentionsToDisplay(body: string, users: Record<string, User>): string {
@@ -104,4 +119,19 @@ export function mentionsToRaw(text: string, members: User[]): string {
   let out = text
   for (const u of names) out = out.replace(new RegExp(`@${esc(u.name)}(?![\\p{L}\\p{N}_])`, 'gu'), `<@${u.id}>`)
   return out.replace(/@everyone(?![\p{L}\p{N}_])/gu, '<@everyone>')
+}
+
+// How many emoji a message is made of when it has nothing else in it (1 to 4), or 0 for any other message.
+const segmenter = typeof Intl !== 'undefined' && 'Segmenter' in Intl ? new Intl.Segmenter(undefined, { granularity: 'grapheme' }) : null
+const EMOJI_ONLY = /^(?:\p{Extended_Pictographic}|\p{Regional_Indicator}|[#*0-9]\uFE0F?\u20E3)/u
+export function emojiOnlyCount(body: string): number {
+  const text = body.trim()
+  if (!text || !segmenter || text.length > 80) return 0
+  let n = 0
+  for (const { segment } of segmenter.segment(text)) {
+    if (/^\s+$/.test(segment)) continue
+    if (!EMOJI_ONLY.test(segment)) return 0
+    if (++n > 4) return 0
+  }
+  return n
 }

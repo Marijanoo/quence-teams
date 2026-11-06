@@ -2,15 +2,13 @@ import { isNative } from './platform'
 import type { ActivityItem, CallLog, Channel, Chat, Meeting, Message, SearchHit, Team, TeamDetail, User } from './types'
 
 const KEY_TOKEN = 'qt.token'
-const KEY_SERVER = 'qt.server'
 
-// On a website the API lives on the same origin. In the desktop and Android apps the page is served locally, so the
-// app points at a server (this one unless the person changes it).
+// On a website the API lives on the same origin. In the desktop and Android apps the page is served locally, so they
+// always talk to teams.kolaj.fun.
 export function defaultServer(): string {
   return location.protocol.startsWith('http') && !isNative ? '' : 'https://teams.kolaj.fun'
 }
-export const getServer = () => (localStorage.getItem(KEY_SERVER) ?? defaultServer()).replace(/\/+$/, '')
-export const setServer = (url: string) => localStorage.setItem(KEY_SERVER, url.trim())
+export const getServer = () => defaultServer()
 export const getToken = () => localStorage.getItem(KEY_TOKEN)
 export const setToken = (t: string | null) => (t ? localStorage.setItem(KEY_TOKEN, t) : localStorage.removeItem(KEY_TOKEN))
 
@@ -46,6 +44,9 @@ async function request<T>(method: string, path: string, body?: unknown): Promise
 export const fileUrl = (id: string, download = false) =>
   `${getServer()}/api/files/${id}?token=${encodeURIComponent(getToken() ?? '')}${download ? '&download=1' : ''}`
 
+export const avatarUrl = (id: string, version: number) =>
+  `${getServer()}/api/users/${id}/avatar?v=${version}&token=${encodeURIComponent(getToken() ?? '')}`
+
 export interface Bootstrap {
   me: User; presencePref: string; users: User[]; teams: Team[]; chats: Chat[]
   presence: Record<string, string>; activityUnseen: number; favorites: string[]; savedIds: string[]
@@ -56,6 +57,8 @@ export const api = {
   register: (name: string, email: string, password: string) => request<{ token: string; user: User }>('POST', '/api/auth/register', { name, email, password }),
   iceServers: () => request<{ iceServers: RTCIceServer[] }>('GET', '/api/ice'),
   bootstrap: () => request<Bootstrap>('GET', '/api/bootstrap'),
+  uploadAvatar: (file: Blob) => { const f = new FormData(); f.set('file', file, 'avatar'); return request<User>('POST', '/api/me/avatar', f) },
+  removeAvatar: () => request<User>('DELETE', '/api/me/avatar'),
   updateMe: (patch: { title?: string; statusMsg?: string; presence?: string }) => request<User>('PATCH', '/api/me', patch),
 
   createTeam: (name: string, description = '') => request<Team>('POST', '/api/teams', { name, description }),
@@ -110,6 +113,8 @@ export const api = {
   meetings: (from: number, to: number) => request<Meeting[]>('GET', `/api/meetings?from=${from}&to=${to}`),
   createMeeting: (m: { title: string; description?: string; startsAt: number; endsAt: number; attendeeIds: string[]; convoId?: string | null }) =>
     request<Meeting>('POST', '/api/meetings', m),
+  updateMeeting: (id: string, patch: { title?: string; description?: string; startsAt?: number; endsAt?: number; attendeeIds?: string[] }) =>
+    request<Meeting>('PATCH', `/api/meetings/${id}`, patch),
   respondMeeting: (id: string, response: string) => request<Meeting>('PUT', `/api/meetings/${id}/response`, { response }),
   deleteMeeting: (id: string) => request('DELETE', `/api/meetings/${id}`)
 }

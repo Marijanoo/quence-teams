@@ -1,10 +1,10 @@
 import { useState } from 'react'
 import { Loader2 } from 'lucide-react'
-import { api, defaultServer, getServer, setServer } from '../lib/api'
+import { api } from '../lib/api'
 import { useStore } from '../lib/store'
 import { TitleBar } from './TitleBar'
 import { BottomBar } from './BottomBar'
-import { isNative } from '../lib/platform'
+import { AppearanceSheet } from './AppearanceSheet'
 
 // Mirrors the Quence API sign-in screen: title bar on top, centred form, labels above the inputs.
 export function Login() {
@@ -13,18 +13,14 @@ export function Login() {
   const [name, setName] = useState('')
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
-  const [server, setServerField] = useState(getServer())
-  const [showServer, setShowServer] = useState(false)
   const [error, setError] = useState('')
   const [busy, setBusy] = useState(false)
-  const desktop = !location.protocol.startsWith('http') || isNative
 
   async function submit(e: React.FormEvent) {
     e.preventDefault()
     setError('')
     setBusy(true)
     try {
-      if (desktop) setServer(server.trim() || defaultServer())
       const res = mode === 'login' ? await api.login(email.trim(), password) : await api.register(name.trim(), email.trim(), password)
       await signIn(res.token, res.user)
     } catch (err) {
@@ -37,6 +33,7 @@ export function Login() {
   return (
     <div className="login-screen">
       <TitleBar />
+      <div className="work">
       <div className="login-center">
         <form className="login-form" onSubmit={submit}>
           <div className="login-head">
@@ -62,13 +59,6 @@ export function Login() {
               autoComplete={mode === 'login' ? 'current-password' : 'new-password'} required minLength={mode === 'register' ? 6 : undefined} disabled={busy} />
           </div>
 
-          {desktop && showServer && (
-            <div className="form-row">
-              <label htmlFor="server">Server</label>
-              <input id="server" className="input" value={server} onChange={e => setServerField(e.target.value)} placeholder="https://teams.kolaj.fun" disabled={busy} />
-            </div>
-          )}
-
           {error && <p className="login-error" role="alert">{error}</p>}
 
           <button className="btn primary block" disabled={busy}>
@@ -81,12 +71,9 @@ export function Login() {
               {mode === 'login' ? 'Sign up' : 'Sign in'}
             </button>
           </p>
-          {desktop && !showServer && (
-            <p className="login-switch" style={{ marginTop: -8 }}>
-              <button type="button" className="link-btn muted-link" onClick={() => setShowServer(true)}>Change server</button>
-            </p>
-          )}
         </form>
+      </div>
+      <AppearanceSheet />
       </div>
       <BottomBar />
     </div>

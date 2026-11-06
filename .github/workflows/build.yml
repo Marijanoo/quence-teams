@@ -82,7 +82,7 @@ jobs:
 
   # Signed Android APK, attached to the same release. It is the web client in a WebView (Capacitor); there is no store,
   # so the app itself offers the newer APK from the latest release. Every build must use the same release key (the
-  # repository secrets below) so each APK installs over the last one; the key is also kept in /root/secrets on the server.
+  # repository secrets below) so each APK installs over the last one.
   # Secrets: ANDROID_KEYSTORE_B64, ANDROID_KEYSTORE_PASSWORD, ANDROID_KEY_PASSWORD, ANDROID_KEY_ALIAS.
   build-android:
     runs-on: ubuntu-latest

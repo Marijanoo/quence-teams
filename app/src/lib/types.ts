@@ -1,6 +1,6 @@
 export type Presence = 'available' | 'busy' | 'dnd' | 'away' | 'offline'
 
-export interface User { id: string; name: string; email: string; title: string; statusMsg: string; color: number }
+export interface User { id: string; name: string; email: string; title: string; statusMsg: string; color: number; avatar: number }
 export interface Quote { id: string; convoId: string; author: User | null; snippet: string; deleted: boolean; hasAttachment: boolean }
 export interface Reaction { emoji: string; userIds: string[] }
 export interface Attachment { id: string; name: string; mime: string; size: number }

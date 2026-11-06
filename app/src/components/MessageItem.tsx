@@ -1,23 +1,25 @@
 import { useEffect, useState, type MutableRefObject } from 'react'
-import { Bookmark, BookmarkCheck, CornerUpLeft, FileText, Pencil, Pin, PinOff, Smile, Trash2, Video, MessageSquareReply, Paperclip } from 'lucide-react'
+import { Bookmark, BookmarkCheck, CornerUpLeft, FileText, MoreHorizontal, Pencil, Pin, PinOff, Smile, SmilePlus, Trash2, Video, MessageSquareReply, Paperclip } from 'lucide-react'
 import { api, fileUrl } from '../lib/api'
-import { EMOJIS, formatBytes, formatTime, mentionsToDisplay, mentionsToRaw, plainText, renderBody } from '../lib/format'
+import { EMOJIS, QUICK_REACTIONS, emojiOnlyCount, formatBytes, formatTime, mentionsToDisplay, mentionsToRaw, plainText, renderBody } from '../lib/format'
+import { useSettings } from '../lib/settings'
 import { askConfirm, convoName, useStore } from '../lib/store'
 import type { Message } from '../lib/types'
 import { Avatar, useClickOutside, useKeepInViewport } from './ui'
 
-const QUICK = EMOJIS.slice(0, 6)
 
-function ReactionPicker({ onPick, onClose }: { onPick: (e: string) => void; onClose: () => void }) {
+// Quick reactions with a way to the full emoji grid.
+function ReactionPicker({ onPick, onClose, align = 'left' }: { onPick: (e: string) => void; onClose: () => void; align?: 'left' | 'right' }) {
   const outside = useClickOutside<HTMLDivElement>(onClose)
   const fit = useKeepInViewport<HTMLDivElement>()
   const [more, setMore] = useState(false)
   return (
-    <div ref={el => { (outside as MutableRefObject<HTMLDivElement | null>).current = el; (fit as MutableRefObject<HTMLDivElement | null>).current = el }} className="popup" style={{ left: 0, top: '100%', marginTop: 4, padding: 4 }}>
+    <div ref={el => { (outside as MutableRefObject<HTMLDivElement | null>).current = el; (fit as MutableRefObject<HTMLDivElement | null>).current = el }}
+      className="popup react-pop" style={{ [align]: 0, top: '100%', marginTop: 4, padding: 4 }}>
       {more
         ? <div className="emoji-grid">{EMOJIS.map(e => <button key={e} onClick={() => { onPick(e); onClose() }} aria-label={`React ${e}`}>{e}</button>)}</div>
         : <div className="quick" style={{ display: 'flex' }}>
-            {QUICK.map(e => <button key={e} onClick={() => { onPick(e); onClose() }} aria-label={`React ${e}`}>{e}</button>)}
+            {QUICK_REACTIONS.map(e => <button key={e} onClick={() => { onPick(e); onClose() }} aria-label={`React ${e}`}>{e}</button>)}
             <button onClick={() => setMore(true)} aria-label="More reactions" title="More" style={{ fontSize: 14 }}>•••</button>
           </div>}
     </div>
@@ -82,7 +84,17 @@ export function MessageItem({ msg, compact, inThread, canModerate, onReply, onQu
     setTouchOpen(o => !o)
   }
 
-  const cls = `msg${mine ? ' mine' : ''}${compact ? ' compact' : ''}${picker ? ' menu-open' : ''}${touchOpen ? ' touch-open' : ''}`
+  const cfg = useSettings()
+  const [moreOpen, setMoreOpen] = useState(false)
+  const moreRef = useClickOutside<HTMLDivElement>(() => setMoreOpen(false), moreOpen)
+  const moreFit = useKeepInViewport<HTMLDivElement>(moreOpen)
+  const [grid, setGrid] = useState(false) // full emoji picker opened from the "more" menu
+
+  // A message made of one to three emoji alone is shown big, like in Teams. Four are shown at normal size.
+  const big = cfg.bigEmoji && !msg.subject && !msg.replyTo && msg.attachments.length === 0 && msg.kind === 'text' ? emojiOnlyCount(msg.body) : 0
+  const emojiClass = big >= 1 && big <= 3 ? ` emoji e${big}` : ''
+
+  const cls = `msg${mine ? ' mine' : ''}${compact ? ' compact' : ''}${picker || moreOpen || grid ? ' menu-open' : ''}${touchOpen ? ' touch-open' : ''}`
 
   if (msg.deleted) {
     return (
@@ -93,8 +105,15 @@ export function MessageItem({ msg, compact, inThread, canModerate, onReply, onQu
     )
   }
 
+  const pending = msg.id.startsWith('pending-')
+  const canReply = !!onQuote || (!inThread && !!onReply)
+  const doReply = () => (onQuote ? onQuote(msg) : onReply?.(msg))
+  const item = (icon: React.ReactNode, label: string, fn: () => void, danger = false) => (
+    <button className={danger ? 'danger' : ''} onClick={() => { setMoreOpen(false); fn() }}>{icon}{label}</button>
+  )
+
   return (
-    <div className={cls + (msg.id.startsWith('pending-') ? ' pending' : '')} data-id={msg.id} onClick={onTap}>
+    <div className={cls + (pending ? ' pending' : '')} data-id={msg.id} onClick={onTap}>
       {!mine && <div className="avatar-slot"><Avatar user={msg.author} size={36} presence /></div>}
       <div className="msg-col">
         {!compact && (
@@ -116,43 +135,74 @@ export function MessageItem({ msg, compact, inThread, canModerate, onReply, onQu
             <button className="btn primary sm" onClick={() => joinCall(msg.convoId, title)}>Join</button>
           </div>
         ) : (
-          <div className={`bubble${msg.pinned ? ' pinned' : ''}`}>
-            {msg.replyTo && <QuoteBlock msg={msg.replyTo} onJump={() => void goTo(msg.convoId, msg.replyTo!.id)} />}
-            {msg.subject && <div className="subject">{msg.subject}</div>}
-            {editing ? (
-              <div style={{ minWidth: 260 }}>
-                <textarea className="input" rows={3} value={draft} autoFocus onChange={e => setDraft(e.target.value)}
-                  onKeyDown={e => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); void saveEdit() } if (e.key === 'Escape') setEditing(false) }} />
-                <div style={{ display: 'flex', gap: 6, marginTop: 6 }}>
-                  <button className="btn primary sm" onClick={saveEdit}>Save</button>
-                  <button className="btn sm" onClick={() => setEditing(false)}>Cancel</button>
+          <div className="bubble-wrap">
+            <div className={`bubble${msg.pinned ? ' pinned' : ''}${msg.reactions.length ? ' has-reactions' : ''}${emojiClass}`}>
+              {msg.replyTo && <QuoteBlock msg={msg.replyTo} onJump={() => void goTo(msg.convoId, msg.replyTo!.id)} />}
+              {msg.subject && <div className="subject">{msg.subject}</div>}
+              {editing ? (
+                <div style={{ minWidth: 260 }}>
+                  <textarea className="input" rows={3} value={draft} autoFocus onChange={e => setDraft(e.target.value)}
+                    onKeyDown={e => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); void saveEdit() } if (e.key === 'Escape') setEditing(false) }} />
+                  <div style={{ display: 'flex', gap: 6, marginTop: 6 }}>
+                    <button className="btn primary sm" onClick={saveEdit}>Save</button>
+                    <button className="btn sm" onClick={() => setEditing(false)}>Cancel</button>
+                  </div>
                 </div>
-              </div>
-            ) : msg.body && <div className="text">{renderBody(msg.body, users, me.id)}</div>}
+              ) : msg.body && <div className="text">{renderBody(msg.body, users, me.id)}</div>}
 
-            {msg.attachments.length > 0 && (
-              <div className="attachments">
-                {msg.attachments.map(a => /^image\/(png|jpe?g|gif|webp)$/.test(a.mime)
-                  ? <img key={a.id} className="attach-img" src={fileUrl(a.id)} alt={a.name} onClick={() => onImage?.(fileUrl(a.id))} />
-                  : <a key={a.id} className="attach-file" href={fileUrl(a.id, true)} download={a.name}>
-                      <FileText size={20} /><div style={{ minWidth: 0 }}><div className="name">{a.name}</div><div className="muted" style={{ fontSize: 12 }}>{formatBytes(a.size)}</div></div>
-                    </a>)}
+              {msg.attachments.length > 0 && (
+                <div className="attachments">
+                  {msg.attachments.map(a => /^image\/(png|jpe?g|gif|webp)$/.test(a.mime)
+                    ? <img key={a.id} className="attach-img" src={fileUrl(a.id)} alt={a.name} onClick={() => onImage?.(fileUrl(a.id))} />
+                    : <a key={a.id} className="attach-file" href={fileUrl(a.id, true)} download={a.name}>
+                        <FileText size={20} /><div style={{ minWidth: 0 }}><div className="name">{a.name}</div><div className="muted" style={{ fontSize: 12 }}>{formatBytes(a.size)}</div></div>
+                      </a>)}
+                </div>
+              )}
+            </div>
+
+            {msg.reactions.length > 0 && (
+              <div className="reactions">
+                {msg.reactions.map(r => {
+                  const has = r.userIds.includes(me.id)
+                  return (
+                    <button key={r.emoji} className={`reaction${has ? ' mine' : ''}`} onClick={() => run(api.react(msg.id, r.emoji, !has))}
+                      title={r.userIds.map(id => users[id]?.name ?? 'someone').join(', ')}>
+                      <span className="emo">{r.emoji}</span><span className="cnt">{r.userIds.length}</span>
+                    </button>
+                  )
+                })}
+                {!pending && (
+                  <div style={{ position: 'relative' }}>
+                    <button className="reaction add" onClick={() => setPicker(p => !p)} aria-label="Add a reaction" title="Add a reaction"><SmilePlus size={15} /></button>
+                    {picker && <ReactionPicker onPick={react} onClose={() => setPicker(false)} align={mine ? 'right' : 'left'} />}
+                  </div>
+                )}
               </div>
             )}
-          </div>
-        )}
 
-        {msg.reactions.length > 0 && (
-          <div className="reactions">
-            {msg.reactions.map(r => {
-              const has = r.userIds.includes(me.id)
-              return (
-                <button key={r.emoji} className={`reaction${has ? ' mine' : ''}`} onClick={() => run(api.react(msg.id, r.emoji, !has))}
-                  title={r.userIds.map(id => users[id]?.name ?? 'someone').join(', ')}>
-                  <span>{r.emoji}</span><span>{r.userIds.length}</span>
-                </button>
-              )
-            })}
+            {!editing && !pending && (
+              <div className="toolbar" role="toolbar" aria-label="Message actions">
+                {QUICK_REACTIONS.map(e => <button key={e} className="quick-emoji" onClick={() => react(e)} aria-label={`React ${e}`}>{e}</button>)}
+                <div ref={moreRef} style={{ position: 'relative' }}>
+                  <button className="icon-btn" title="More actions" aria-label="More actions" aria-haspopup="menu" aria-expanded={moreOpen} onClick={() => setMoreOpen(o => !o)}><MoreHorizontal size={16} /></button>
+                  {moreOpen && (
+                    <div ref={moreFit} className="menu" style={{ top: '100%', [mine ? 'right' : 'left']: 0, marginTop: 4 }} role="menu">
+                      {canReply && msg.kind === 'text' && item(<CornerUpLeft size={15} />, 'Reply', doReply)}
+                      {item(<Smile size={15} />, 'More reactions', () => setGrid(true))}
+                      {mine && msg.kind === 'text' && item(<Pencil size={15} />, 'Edit', () => { setDraft(mentionsToDisplay(msg.body, users)); setEditing(true) })}
+                      {item(saved ? <BookmarkCheck size={15} /> : <Bookmark size={15} />, saved ? 'Remove from saved' : 'Save this message', () => void toggleSaved(msg.id))}
+                      {!inThread && item(msg.pinned ? <PinOff size={15} /> : <Pin size={15} />, msg.pinned ? 'Unpin' : 'Pin', () => run(api.pin(msg.id, !msg.pinned)))}
+                      {(mine || canModerate) && <hr />}
+                      {(mine || canModerate) && item(<Trash2 size={15} />, 'Delete', async () => {
+                        if (await askConfirm({ title: 'Delete this message?', message: 'This cannot be undone.', confirmLabel: 'Delete', danger: true })) void run(api.remove(msg.id))
+                      }, true)}
+                    </div>
+                  )}
+                  {grid && <ReactionPicker onPick={react} onClose={() => setGrid(false)} align={mine ? 'right' : 'left'} />}
+                </div>
+              </div>
+            )}
           </div>
         )}
 
@@ -160,23 +210,6 @@ export function MessageItem({ msg, compact, inThread, canModerate, onReply, onQu
           <button className="thread-link" onClick={() => onReply?.(msg)}>
             <MessageSquareReply size={14} /> {msg.replyCount} {msg.replyCount === 1 ? 'reply' : 'replies'}
           </button>
-        )}
-
-        {!editing && !msg.id.startsWith('pending-') && (
-          <div className="toolbar">
-            <div style={{ position: 'relative' }}>
-              <button className="icon-btn" title="React" onClick={() => setPicker(p => !p)}><Smile size={16} /></button>
-              {picker && <ReactionPicker onPick={react} onClose={() => setPicker(false)} />}
-            </div>
-            {onQuote && msg.kind === 'text' && <button className="icon-btn" title="Reply" onClick={() => onQuote(msg)}><CornerUpLeft size={16} /></button>}
-            {!onQuote && !inThread && msg.kind === 'text' && <button className="icon-btn" title="Reply" onClick={() => onReply?.(msg)}><CornerUpLeft size={16} /></button>}
-            {mine && msg.kind === 'text' && <button className="icon-btn" title="Edit" onClick={() => { setDraft(mentionsToDisplay(msg.body, users)); setEditing(true) }}><Pencil size={16} /></button>}
-            <button className="icon-btn" title={saved ? 'Remove from saved' : 'Save'} aria-pressed={saved} onClick={() => void toggleSaved(msg.id)}>{saved ? <BookmarkCheck size={16} color="var(--accent)" /> : <Bookmark size={16} />}</button>
-            {!inThread && <button className="icon-btn" title={msg.pinned ? 'Unpin' : 'Pin'} onClick={() => run(api.pin(msg.id, !msg.pinned))}>{msg.pinned ? <PinOff size={16} /> : <Pin size={16} />}</button>}
-            {(mine || canModerate) && <button className="icon-btn" title="Delete" onClick={async () => {
-              if (await askConfirm({ title: 'Delete this message?', message: 'This cannot be undone.', confirmLabel: 'Delete', danger: true })) void run(api.remove(msg.id))
-            }}><Trash2 size={16} /></button>}
-          </div>
         )}
       </div>
     </div>

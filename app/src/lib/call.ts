@@ -1,3 +1,4 @@
+import { getSettings } from './settings'
 import { socket } from './socket'
 
 export interface Participant {
@@ -139,7 +140,8 @@ export class CallSession {
     if (video) { video.enabled = on; return on }
     if (!on) return false
     try {
-      const cam = await navigator.mediaDevices.getUserMedia({ video: { width: 1280, height: 720 } })
+      const camId = getSettings().camId
+      const cam = await navigator.mediaDevices.getUserMedia({ video: { width: 1280, height: 720, ...(camId ? { deviceId: { ideal: camId } } : {}) } })
       const track = cam.getVideoTracks()[0]
       this.local.addTrack(track)
       for (const { pc } of this.peers.values()) pc.addTrack(track, this.local)

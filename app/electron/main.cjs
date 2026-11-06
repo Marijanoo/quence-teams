@@ -118,6 +118,8 @@ if (!app.requestSingleInstanceLock()) {
     }, { useSystemPicker: true })
 
     // Window controls for the custom title bar.
+    ipcMain.on('set-login-item', (_e, on) => { try { app.setLoginItemSettings({ openAtLogin: !!on }) } catch { /* not supported on this platform */ } })
+    ipcMain.handle('get-login-item', () => { try { return app.getLoginItemSettings().openAtLogin } catch { return false } })
     ipcMain.on('window-minimize', e => BrowserWindow.fromWebContents(e.sender)?.minimize())
     ipcMain.on('window-maximize', e => {
       const w = BrowserWindow.fromWebContents(e.sender)

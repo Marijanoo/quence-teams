@@ -1,6 +1,7 @@
 import { create } from 'zustand'
 import { api, ApiError, getToken, setToken } from './api'
 import { socket } from './socket'
+import { beep, getSettings } from './settings'
 import type { CallLog, Chat, Meeting, Message, Presence, QuickView, Selection, Team, User, View } from './types'
 
 interface ConvoCache { messages: Message[]; hasMore: boolean; loaded: boolean }
@@ -40,6 +41,8 @@ interface State {
   activeCall: ActiveCall | null
   toasts: Toast[]
   confirmState: ConfirmState | null
+  appearanceOpen: boolean
+  settingsSection: string | null
 
   signIn: (token: string, user: User) => Promise<void>
   signOut: () => void
@@ -122,7 +125,7 @@ export const useStore = create<State>((set, get) => ({
   me: null, presencePref: 'available', users: {}, presence: {}, teams: [], chats: [], activityUnseen: 0, meetings: [], callHistory: [], favorites: [], savedIds: [], drafts: {}, quickView: null,
   ready: false, online: false,
   view: 'chat', selection: null, threadId: null, jumpTo: null, convos: {}, threads: {}, typing: {},
-  calls: {}, incoming: null, activeCall: null, toasts: [], confirmState: null,
+  calls: {}, incoming: null, activeCall: null, toasts: [], confirmState: null, appearanceOpen: false, settingsSection: null,
 
   async signIn(token, user) {
     setToken(token)
@@ -417,10 +420,17 @@ function clearTyping(typing: State['typing'], convoId: string, userId?: string) 
 
 function notify(msg: Message) {
   const s = useStore.getState()
+  const cfg = getSettings()
   if (s.presencePref === 'dnd') return
-  if (typeof Notification === 'undefined' || Notification.permission !== 'granted') return
+  const isChannel = s.teams.some(t => t.channels.some(c => c.id === msg.convoId))
+  const mentioned = !!s.me && (msg.body.includes(`<@${s.me.id}>`) || msg.body.includes('<@everyone>'))
+  const mode = isChannel ? cfg.notifyChannels : cfg.notifyChats
+  if (mode === 'off' || (mode === 'mentions' && !mentioned)) return
+  if (cfg.soundMessage) beep('message')
+  if (!cfg.notifyDesktop || typeof Notification === 'undefined' || Notification.permission !== 'granted') return
   const text = msg.body.replace(/<@([0-9a-f-]{36}|everyone)>/g, (_m, id) => id === 'everyone' ? '@everyone' : `@${s.users[id]?.name ?? 'someone'}`)
-  const n = new Notification(`${msg.author?.name ?? 'Someone'} · ${convoName(s, msg.convoId)}`, { body: msg.kind === 'call' ? 'Started a meeting' : text || 'Sent a file', silent: false })
+  const body = msg.kind === 'call' ? 'Started a meeting' : !cfg.notifyPreview ? 'Sent a message' : text || 'Sent a file'
+  const n = new Notification(`${msg.author?.name ?? 'Someone'} · ${convoName(s, msg.convoId)}`, { body, silent: true })
   n.onclick = () => { window.focus(); n.close() }
 }
 
