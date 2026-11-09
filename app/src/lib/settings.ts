@@ -10,6 +10,11 @@ export interface Settings {
   soundMessage: boolean
   soundCall: boolean
   meetingReminder: number // minutes before the start, 0 = off
+  quietEnabled: boolean   // quiet hours: no sounds or desktop notifications for messages
+  quietStart: number      // hour of the day
+  quietEnd: number
+  quietWeekends: boolean
+  linkPreviews: boolean
   // chat
   enterToSend: boolean
   density: 'comfortable' | 'compact'
@@ -39,7 +44,7 @@ export interface Settings {
 
 export const DEFAULT_SETTINGS: Settings = {
   notifyDesktop: true, notifyChats: 'all', notifyChannels: 'mentions', notifyPreview: true,
-  soundMessage: true, soundCall: true, meetingReminder: 5,
+  soundMessage: true, soundCall: true, meetingReminder: 5, quietEnabled: false, quietStart: 18, quietEnd: 8, quietWeekends: false, linkPreviews: true,
   enterToSend: true, density: 'comfortable', textSize: 100, spellcheck: true, sendTyping: true, bigEmoji: true,
   weekStart: 1, hour12: 'auto', showWeekends: true, workStart: 9, workEnd: 17, defaultLength: 30,
   micId: '', camId: '', speakerId: '', echoCancellation: true, noiseSuppression: true, autoGain: true, joinMuted: false,
@@ -55,6 +60,8 @@ function clean(s: Settings): Settings {
     ...s,
     textSize: clamp(Math.round(s.textSize), 85, 140),
     workStart,
+    quietStart: clamp(Math.round(s.quietStart), 0, 23),
+    quietEnd: clamp(Math.round(s.quietEnd), 0, 23),
     workEnd: clamp(Math.round(s.workEnd), workStart + 1, 24),
     defaultLength: clamp(Math.round(s.defaultLength), 5, 480),
     meetingReminder: clamp(Math.round(s.meetingReminder), 0, 120)
@@ -73,6 +80,16 @@ let current: Settings = load()
 const listeners = new Set<() => void>()
 
 export const getSettings = () => current
+
+// True while quiet hours are on and the clock is inside them (the window may cross midnight).
+export function inQuietHours(s: Settings = current, at = new Date()): boolean {
+  if (!s.quietEnabled) return false
+  const day = at.getDay()
+  if (s.quietWeekends && (day === 0 || day === 6)) return true
+  const h = at.getHours() + at.getMinutes() / 60
+  if (s.quietStart === s.quietEnd) return false
+  return s.quietStart < s.quietEnd ? h >= s.quietStart && h < s.quietEnd : h >= s.quietStart || h < s.quietEnd
+}
 
 // Classes and variables that the stylesheet reads.
 export function applySettings(s: Settings = current) {

@@ -1,10 +1,11 @@
 import { useEffect, useRef, useState } from 'react'
 import { audioConstraints, getSettings, useSettings } from '../lib/settings'
-import { Camera, CameraOff, Mic, MicOff, MonitorUp, PhoneOff, Users } from 'lucide-react'
+import { Camera, CameraOff, Hand, MessageSquare, Mic, MicOff, MonitorUp, PhoneOff, Smile, Sparkles, Users } from 'lucide-react'
 import { api } from '../lib/api'
 import { CallSession, type Participant } from '../lib/call'
 import { useStore } from '../lib/store'
 import { Avatar } from './ui'
+import { Emoji } from './CustomEmoji'
 
 function VideoTile({ stream, muted, mirror, screen }: { stream: MediaStream | null; muted?: boolean; mirror?: boolean; screen?: boolean }) {
   const ref = useRef<HTMLVideoElement>(null)
@@ -48,7 +49,7 @@ function useSpeaking(stream: MediaStream | null) {
   return speaking
 }
 
-function PersonTile({ userId, stream, muted, label, mirror, status }: { userId: string; stream: MediaStream | null; muted?: boolean; label?: string; mirror?: boolean; status?: string }) {
+function PersonTile({ userId, stream, muted, label, mirror, status, hand }: { userId: string; stream: MediaStream | null; muted?: boolean; label?: string; mirror?: boolean; status?: string; hand?: boolean }) {
   const user = useStore(s => s.users[userId])
   const speaking = useSpeaking(muted ? null : stream)
   const showVideo = hasLiveVideo(stream)
@@ -56,6 +57,7 @@ function PersonTile({ userId, stream, muted, label, mirror, status }: { userId: 
     <div className={`tile${speaking ? ' speaking' : ''}`}>
       <VideoTile stream={stream} muted={muted} mirror={mirror} />
       {!showVideo && <Avatar user={user} size={84} />}
+      {hand && <div className="hand-badge" title="Hand raised" aria-label="Hand raised">✋</div>}
       <div className="label">{label ?? user?.name ?? 'Guest'}{status && <span className="muted"> · {status}</span>}</div>
     </div>
   )
@@ -78,6 +80,14 @@ export function CallView() {
   const [mic, setMic] = useState(() => !getSettings().joinMuted)
   const [cam, setCam] = useState(false)
   const [error, setError] = useState('')
+  const [chatOpen, setChatOpen] = useState(false)
+  const [reactOpen, setReactOpen] = useState(false)
+  const [unreadChat, setUnreadChat] = useState(0)
+  const [line, setLine] = useState('')
+  const chatOpenRef = useRef(false)
+  chatOpenRef.current = chatOpen
+  const users = useStore(s => s.users)
+  const isConvo = useStore(s => s.chats.some(c => c.id === call.room) || s.teams.some(t => t.channels.some(c => c.id === call.room)))
 
   useEffect(() => {
     let s: CallSession | null = null
@@ -100,6 +110,7 @@ export function CallView() {
       s = new CallSession(call.room, me.id, stream, ice)
       s.onChange = () => force(n => n + 1)
       s.onError = m => { setError(m); toast(m, 'error') }
+      s.onChat = l => { if (!chatOpenRef.current && l.userId !== me.id) setUnreadChat(n => n + 1) }
       setSession(s)
     })()
     return () => { cancelled = true; s?.leave() }
@@ -109,12 +120,12 @@ export function CallView() {
 
   const parts: Participant[] = session.participants
   const tiles: { key: string; node: JSX.Element }[] = [
-    { key: 'me', node: <PersonTile userId={me.id} stream={session.local} muted mirror label="You" /> }
+    { key: 'me', node: <PersonTile userId={me.id} stream={session.local} muted mirror label="You" hand={session.hands.has(me.id)} /> }
   ]
   const shared = session.screenPreview
   if (shared) tiles.push({ key: 'my-screen', node: <div className="tile screen"><VideoTile stream={shared} muted screen /><div className="label">Your screen</div></div> })
   for (const p of parts) {
-    tiles.push({ key: p.userId, node: <PersonTile userId={p.userId} stream={p.stream} status={connectionStatus(p.connection)} /> })
+    tiles.push({ key: p.userId, node: <PersonTile userId={p.userId} stream={p.stream} status={connectionStatus(p.connection)} hand={session.hands.has(p.userId)} /> })
     if (p.screen) tiles.push({ key: p.userId + '-screen', node: <div className="tile screen"><VideoTile stream={p.screen} screen /><div className="label">Screen</div></div> })
   }
   const cols = tiles.length <= 1 ? 1 : tiles.length <= 4 ? 2 : 3
@@ -125,10 +136,33 @@ export function CallView() {
         <b>{call.title}</b>
         <span className="muted" style={{ display: 'flex', gap: 6, alignItems: 'center' }}><Users size={15} /> {parts.length + 1}</span>
       </div>
+ <div className="call-reactions" aria-hidden>
+        {session.reactions.map(r => <span key={r.id} className="call-react" style={{ left: `${10 + (r.id * 37) % 80}%` }}><Emoji value={r.emoji} /><small>{r.userId === me.id ? 'You' : users[r.userId]?.name.split(' ')[0]}</small></span>)}
+      </div>
+      <div className="call-body">
       <div className="call-grid" style={{ gridTemplateColumns: `repeat(${cols}, minmax(0, 1fr))` }}>
         {error && <div className="form-error" style={{ gridColumn: '1 / -1' }}>{error}</div>}
         {tiles.map(t => <div key={t.key} style={{ display: 'contents' }}>{t.node}</div>)}
         {parts.length === 0 && <div className="muted" style={{ gridColumn: '1 / -1', textAlign: 'center' }}>Waiting for others to join…</div>}
+      </div>
+      {chatOpen && (
+        <aside className="call-chat" aria-label="Call chat">
+          <div className="call-chat-lines">
+            {session.chat.length === 0 && <div className="muted" style={{ padding: 8 }}>{isConvo ? 'Messages here are also posted in the conversation.' : 'Messages here disappear when the call ends.'}</div>}
+            {session.chat.map((l, i) => <div key={i} className="call-chat-line"><b>{l.userId === me.id ? 'You' : users[l.userId]?.name ?? 'Someone'}</b> {l.text}</div>)}
+          </div>
+          <form onSubmit={e => {
+            e.preventDefault()
+            const text = line.trim()
+            if (!text) return
+            session.say(text)
+            if (isConvo) void useStore.getState().sendMessage(call.room, text)
+            setLine('')
+          }}>
+            <input className="input" autoFocus value={line} maxLength={500} placeholder="Message everyone" onChange={e => setLine(e.target.value)} />
+          </form>
+        </aside>
+      )}
       </div>
       <div className="call-controls">
         <button className={`round${mic ? '' : ' off'}`} aria-label={mic ? 'Mute' : 'Unmute'} title={mic ? 'Mute' : 'Unmute'}
@@ -138,6 +172,17 @@ export function CallView() {
         <button className={`round${cam ? ' on' : ''}`} aria-label={cam ? 'Turn camera off' : 'Turn camera on'} title="Camera"
           onClick={async () => setCam(await session.setCameraEnabled(!cam))}>
           {cam ? <Camera size={20} /> : <CameraOff size={20} />}
+        </button>
+        {cam && session.canBlur && (
+          <button className={`round${session.blurred ? ' on' : ''}`} aria-label="Blur background" title="Blur background" onClick={() => void session.setBlur(!session.blurred)}><Sparkles size={20} /></button>
+        )}
+        <button className={`round${session.hands.has(me.id) ? ' on' : ''}`} aria-label={session.hands.has(me.id) ? 'Lower hand' : 'Raise hand'} title="Raise hand" onClick={() => session.setHand(!session.hands.has(me.id))}><Hand size={20} /></button>
+        <div style={{ position: 'relative' }}>
+          <button className="round" aria-label="Send a reaction" title="React" onClick={() => setReactOpen(o => !o)}><Smile size={20} /></button>
+          {reactOpen && <div className="call-react-pop">{['👍', '👏', '❤️', '😂', '😮', '🎉'].map(e => <button key={e} onClick={() => { session.react(e); setReactOpen(false) }}>{e}</button>)}</div>}
+        </div>
+        <button className={`round${chatOpen ? ' on' : ''}`} aria-label="Call chat" title="Chat" onClick={() => { setChatOpen(o => !o); setUnreadChat(0) }}>
+          <MessageSquare size={20} />{unreadChat > 0 && <span className="round-badge">{unreadChat}</span>}
         </button>
         {typeof navigator.mediaDevices?.getDisplayMedia === 'function' && (
           <button className={`round${session.sharingScreen ? ' on' : ''}`} aria-label="Share screen" title="Share screen" onClick={async () => { await session.toggleScreenShare(); force(n => n + 1) }}>

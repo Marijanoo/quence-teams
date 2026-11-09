@@ -1,8 +1,8 @@
 import { create } from 'zustand'
 import { api, ApiError, getToken, setToken } from './api'
 import { socket } from './socket'
-import { beep, getSettings } from './settings'
-import type { CallLog, Chat, Meeting, Message, Presence, QuickView, Selection, Team, User, View } from './types'
+import { beep, getSettings, inQuietHours } from './settings'
+import type { CallLog, Chat, Reminder, Meeting, Message, Presence, QuickView, Selection, Team, User, View } from './types'
 
 interface ConvoCache { messages: Message[]; hasMore: boolean; loaded: boolean }
 export interface Draft { text: string; at: number }
@@ -20,9 +20,12 @@ interface State {
   chats: Chat[]
   activityUnseen: number
   meetings: Meeting[]
+  calRange: { from: number; to: number } | null
   callHistory: CallLog[]
   favorites: string[]
   savedIds: string[]
+  muted: string[]
+  customEmoji: string[]
   drafts: Record<string, Draft>
   quickView: QuickView | null
   ready: boolean
@@ -52,6 +55,9 @@ interface State {
   setQuick: (q: QuickView | null) => void
   toggleFavorite: (convoId: string) => Promise<void>
   toggleSaved: (messageId: string) => Promise<void>
+  toggleMute: (convoId: string) => Promise<void>
+  reloadMeetings: (range?: { from: number; to: number }) => Promise<void>
+  loadEmoji: () => Promise<void>
   sendMessage: (convoId: string, body: string, opts?: { parentId?: string; subject?: string; files?: File[]; replyTo?: Message | null }) => Promise<boolean>
   setDraft: (key: string, text: string) => void
   select: (s: Selection | null) => Promise<void>
@@ -122,7 +128,7 @@ function bump(s: State, msg: Message, mine: boolean): Partial<State> {
 }
 
 export const useStore = create<State>((set, get) => ({
-  me: null, presencePref: 'available', users: {}, presence: {}, teams: [], chats: [], activityUnseen: 0, meetings: [], callHistory: [], favorites: [], savedIds: [], drafts: {}, quickView: null,
+  me: null, presencePref: 'available', users: {}, presence: {}, teams: [], chats: [], activityUnseen: 0, meetings: [], calRange: null, callHistory: [], favorites: [], savedIds: [], muted: [], customEmoji: [], drafts: {}, quickView: null,
   ready: false, online: false,
   view: 'chat', selection: null, threadId: null, jumpTo: null, convos: {}, threads: {}, typing: {},
   calls: {}, incoming: null, activeCall: null, toasts: [], confirmState: null, appearanceOpen: false, settingsSection: null,
@@ -131,6 +137,7 @@ export const useStore = create<State>((set, get) => ({
     setToken(token)
     set({ me: user, drafts: loadDrafts(user.id) })
     await get().bootstrap()
+    void get().loadEmoji()
     wireSocket()
     socket.connect()
   },
@@ -140,7 +147,7 @@ export const useStore = create<State>((set, get) => ({
     setToken(null)
     set({
       me: null, ready: false, teams: [], chats: [], users: {}, presence: {}, convos: {}, threads: {}, selection: null,
-      threadId: null, jumpTo: null, meetings: [], callHistory: [], favorites: [], savedIds: [], drafts: {}, quickView: null, activeCall: null, incoming: null, typing: {}, calls: {}
+      threadId: null, jumpTo: null, meetings: [], calRange: null, callHistory: [], favorites: [], savedIds: [], muted: [], customEmoji: [], drafts: {}, quickView: null, activeCall: null, incoming: null, typing: {}, calls: {}
     })
   },
 
@@ -149,9 +156,31 @@ export const useStore = create<State>((set, get) => ({
     set({
       me: b.me, presencePref: b.presencePref as Presence, users: Object.fromEntries(b.users.map(u => [u.id, u])),
       presence: b.presence as Record<string, Presence>, teams: b.teams, chats: b.chats, activityUnseen: b.activityUnseen, ready: true,
-      favorites: b.favorites, savedIds: b.savedIds,
+      favorites: b.favorites, savedIds: b.savedIds, muted: b.muted ?? [],
       drafts: Object.keys(get().drafts).length ? get().drafts : loadDrafts(b.me.id)
     })
+  },
+
+  // Meetings are fetched as occurrences, so a repeating meeting appears once per day it happens. Always reload the range
+  // the calendar is showing plus the next weeks (sidebar and reminders).
+  async reloadMeetings(range) {
+    if (range) set({ calRange: range })
+    const r = get().calRange, t = Date.now()
+    const from = Math.min(t - 86_400_000, r?.from ?? Infinity), to = Math.max(t + 45 * 86_400_000, r?.to ?? 0)
+    try { set({ meetings: await api.meetings(from, to) }) } catch { /* keep what is shown */ }
+  },
+
+  async loadEmoji() {
+    try { set({ customEmoji: (await api.emoji()).map(e => e.name) }) } catch { /* emoji are optional */ }
+  },
+
+  async toggleMute(convoId) {
+    const on = !get().muted.includes(convoId)
+    set(s => ({ muted: on ? [...s.muted, convoId] : s.muted.filter(id => id !== convoId) }))
+    try { await api.mute(convoId, on) } catch (e) {
+      set(s => ({ muted: on ? s.muted.filter(id => id !== convoId) : [...s.muted, convoId] }))
+      get().toast((e as Error).message, 'error')
+    }
   },
 
   async refreshTeams() {
@@ -312,6 +341,15 @@ function wireSocket() {
   socket.on('hello', d => set({ presence: d.presence, calls: d.calls }))
   socket.on('presence', d => set(s => ({ presence: { ...s.presence, [d.userId]: d.presence } })))
   socket.on('user.updated', u => set(s => ({ users: { ...s.users, [u.id]: u }, me: s.me?.id === u.id ? u : s.me })))
+  socket.on('emoji.updated', () => { void get().loadEmoji() })
+  socket.on('reminder', (r: Reminder & { message: Message | null }) => {
+    get().toast(`Reminder: ${r.text || plainBody(r.message, get().users) || 'a message you saved'}`, 'info')
+    if (getSettings().soundMessage) beep('message')
+    if (getSettings().notifyDesktop && typeof Notification !== 'undefined' && Notification.permission === 'granted') {
+      const n = new Notification('Reminder', { body: r.text || plainBody(r.message, get().users) || 'A message you wanted to come back to', silent: true })
+      n.onclick = () => { window.focus(); if (r.message) void get().goTo(r.message.convoId, r.message.id, r.message.parentId ?? undefined); n.close() }
+    }
+  })
   socket.on('call.state', d => set(s => {
     const calls = { ...s.calls }
     if (d.participants.length) calls[d.room] = d.participants
@@ -375,8 +413,8 @@ function wireSocket() {
     set(st => ({ typing: { ...st.typing, [d.convoId]: { ...st.typing[d.convoId], [d.user.id]: until } } }))
   })
 
-  socket.on('meeting.updated', (m: Meeting) => set(st => ({ meetings: [...st.meetings.filter(x => x.id !== m.id), m].sort((a, b) => a.startsAt - b.startsAt) })))
-  socket.on('meeting.removed', ({ id }) => set(st => ({ meetings: st.meetings.filter(m => m.id !== id) })))
+  socket.on('meeting.updated', () => { void get().reloadMeetings() })
+  socket.on('meeting.removed', ({ id }) => { set(st => ({ meetings: st.meetings.filter(m => m.id !== id) })); void get().reloadMeetings() })
 
   socket.on('call.incoming', (c: IncomingCall) => {
     if (get().activeCall) return
@@ -421,9 +459,10 @@ function clearTyping(typing: State['typing'], convoId: string, userId?: string) 
 function notify(msg: Message) {
   const s = useStore.getState()
   const cfg = getSettings()
-  if (s.presencePref === 'dnd') return
+  if (s.presencePref === 'dnd' || inQuietHours(cfg) || s.activeCall?.room === msg.convoId) return
   const isChannel = s.teams.some(t => t.channels.some(c => c.id === msg.convoId))
   const mentioned = !!s.me && (msg.body.includes(`<@${s.me.id}>`) || msg.body.includes('<@everyone>'))
+  if (s.muted.includes(msg.convoId) && !mentioned) return
   const mode = isChannel ? cfg.notifyChannels : cfg.notifyChats
   if (mode === 'off' || (mode === 'mentions' && !mentioned)) return
   if (cfg.soundMessage) beep('message')
@@ -438,6 +477,7 @@ export async function restoreSession(): Promise<void> {
   if (!getToken()) return
   try {
     await useStore.getState().bootstrap()
+    void useStore.getState().loadEmoji()
     wireSocket()
     socket.connect()
   } catch (e) {
@@ -455,4 +495,8 @@ export function askConfirm(opts: { title: string; message?: string; confirmLabel
 
 function loadDrafts(userId: string): Record<string, Draft> {
   try { return JSON.parse(localStorage.getItem(`qt.drafts.${userId}`) ?? '{}') } catch { return {} }
+}
+
+function plainBody(m: Message | null | undefined, users: Record<string, User>) {
+  return m ? m.body.replace(/<@([0-9a-f-]{36}|everyone)>/g, (_x, id) => id === 'everyone' ? '@everyone' : `@${users[id]?.name ?? 'someone'}`) : ''
 }

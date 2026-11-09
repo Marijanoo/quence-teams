@@ -1,5 +1,5 @@
 import { isNative } from './platform'
-import type { ActivityItem, CallLog, Channel, Chat, Meeting, Message, SearchHit, Team, TeamDetail, User } from './types'
+import type { ActivityItem, CallLog, Channel, Chat, EditVersion, LinkCard, Meeting, Message, Reminder, Scheduled, SearchHit, Team, TeamDetail, User, Webhook } from './types'
 
 const KEY_TOKEN = 'qt.token'
 
@@ -47,9 +47,11 @@ export const fileUrl = (id: string, download = false) =>
 export const avatarUrl = (id: string, version: number) =>
   `${getServer()}/api/users/${id}/avatar?v=${version}&token=${encodeURIComponent(getToken() ?? '')}`
 
+export const emojiUrl = (name: string) => `${getServer()}/api/emoji/${name}?token=${encodeURIComponent(getToken() ?? '')}`
+
 export interface Bootstrap {
   me: User; presencePref: string; users: User[]; teams: Team[]; chats: Chat[]
-  presence: Record<string, string>; activityUnseen: number; favorites: string[]; savedIds: string[]
+  presence: Record<string, string>; activityUnseen: number; favorites: string[]; savedIds: string[]; muted?: string[]
 }
 
 export const api = {
@@ -59,7 +61,7 @@ export const api = {
   bootstrap: () => request<Bootstrap>('GET', '/api/bootstrap'),
   uploadAvatar: (file: Blob) => { const f = new FormData(); f.set('file', file, 'avatar'); return request<User>('POST', '/api/me/avatar', f) },
   removeAvatar: () => request<User>('DELETE', '/api/me/avatar'),
-  updateMe: (patch: { title?: string; statusMsg?: string; presence?: string }) => request<User>('PATCH', '/api/me', patch),
+  updateMe: (patch: { title?: string; statusMsg?: string; presence?: string; oooUntil?: number | null; oooMsg?: string }) => request<User>('PATCH', '/api/me', patch),
 
   createTeam: (name: string, description = '') => request<Team>('POST', '/api/teams', { name, description }),
   team: (id: string) => request<TeamDetail>('GET', `/api/teams/${id}`),
@@ -69,6 +71,7 @@ export const api = {
   setTeamRole: (id: string, userId: string, role: 'owner' | 'member') => request('PATCH', `/api/teams/${id}/members/${userId}`, { role }),
   createChannel: (teamId: string, name: string, isPrivate: boolean, description = '') =>
     request<Channel>('POST', `/api/teams/${teamId}/channels`, { name, isPrivate, description }),
+  setChannelPosting: (id: string, posting: 'all' | 'owners') => request('PATCH', `/api/channels/${id}`, { posting }),
   deleteChannel: (id: string) => request('DELETE', `/api/channels/${id}`),
   addChannelMember: (id: string, userId: string) => request('POST', `/api/channels/${id}/members`, { userId }),
 
@@ -112,11 +115,29 @@ export const api = {
   save: (id: string, on: boolean) => request(on ? 'PUT' : 'DELETE', `/api/messages/${id}/save`),
   saved: () => request<SearchHit[]>('GET', '/api/saved'),
   mentions: () => request<SearchHit[]>('GET', '/api/mentions'),
+  gifs: (q: string) => request<{ id: string; title: string; preview: string; url: string; width: number; height: number }[]>('GET', `/api/gifs?q=${encodeURIComponent(q)}`),
+  sendGif: (convoId: string, gif: { url: string; title: string; parentId?: string }) => request<Message>('POST', `/api/convos/${convoId}/gif`, gif),
+  history: (id: string) => request<EditVersion[]>('GET', `/api/messages/${id}/history`),
+  mute: (convoId: string, on: boolean) => request(on ? 'PUT' : 'DELETE', `/api/muted/${convoId}`),
+  preview: (url: string) => request<LinkCard | null>('GET', `/api/preview?url=${encodeURIComponent(url)}`),
+  scheduled: () => request<Scheduled[]>('GET', '/api/scheduled'),
+  schedule: (s: { convoId: string; parentId?: string; body: string; sendAt: number }) => request<Scheduled>('POST', '/api/scheduled', s),
+  cancelScheduled: (id: string) => request('DELETE', `/api/scheduled/${id}`),
+  reminders: () => request<Reminder[]>('GET', '/api/reminders'),
+  remind: (r: { messageId?: string; text?: string; remindAt: number }) => request<Reminder>('POST', '/api/reminders', r),
+  cancelReminder: (id: string) => request('DELETE', `/api/reminders/${id}`),
+  emoji: () => request<{ name: string; createdBy: string }[]>('GET', '/api/emoji'),
+  addEmoji: (name: string, file: File) => { const f = new FormData(); f.set('name', name); f.set('file', file, file.name); return request('POST', '/api/emoji', f) },
+  removeEmoji: (name: string) => request('DELETE', `/api/emoji/${name}`),
+  webhooks: (channelId: string) => request<Webhook[]>('GET', `/api/channels/${channelId}/webhooks`),
+  addWebhook: (channelId: string, name: string) => request<Webhook>('POST', `/api/channels/${channelId}/webhooks`, { name }),
+  removeWebhook: (channelId: string, id: string) => request('DELETE', `/api/channels/${channelId}/webhooks/${id}`),
+  freeBusy: (users: string[], from: number, to: number) => request<Record<string, [number, number][]>>('GET', `/api/freebusy?users=${users.join(',')}&from=${from}&to=${to}`),
   callHistory: () => request<CallLog[]>('GET', '/api/calls'),
   meetings: (from: number, to: number) => request<Meeting[]>('GET', `/api/meetings?from=${from}&to=${to}`),
-  createMeeting: (m: { title: string; description?: string; startsAt: number; endsAt: number; attendeeIds: string[]; convoId?: string | null }) =>
+  createMeeting: (m: { title: string; description?: string; startsAt: number; endsAt: number; attendeeIds: string[]; convoId?: string | null; recur?: string; recurUntil?: number | null }) =>
     request<Meeting>('POST', '/api/meetings', m),
-  updateMeeting: (id: string, patch: { title?: string; description?: string; startsAt?: number; endsAt?: number; attendeeIds?: string[] }) =>
+  updateMeeting: (id: string, patch: { title?: string; description?: string; startsAt?: number; endsAt?: number; attendeeIds?: string[]; recur?: string; recurUntil?: number | null }) =>
     request<Meeting>('PATCH', `/api/meetings/${id}`, patch),
   respondMeeting: (id: string, response: string) => request<Meeting>('PUT', `/api/meetings/${id}/response`, { response }),
   deleteMeeting: (id: string) => request('DELETE', `/api/meetings/${id}`)

@@ -119,7 +119,7 @@ export function PeoplePicker({ selected, onChange, exclude = [], single = false 
   const meId = useStore(s => s.me?.id)
   const [q, setQ] = useState('')
   const list = Object.values(users)
-    .filter(u => u.id !== meId && !exclude.includes(u.id))
+    .filter(u => u.id !== meId && !u.bot && !exclude.includes(u.id))
     .filter(u => !q || u.name.toLowerCase().includes(q.toLowerCase()) || u.email.toLowerCase().includes(q.toLowerCase()))
     .sort((a, b) => a.name.localeCompare(b.name))
   const toggle = (id: string) => onChange(single ? [id] : selected.includes(id) ? selected.filter(x => x !== id) : [...selected, id])

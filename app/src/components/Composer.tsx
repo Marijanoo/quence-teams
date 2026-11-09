@@ -1,9 +1,12 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
-import { AtSign, BarChart3, Paperclip, Send, Smile, X, Type } from 'lucide-react'
-import { EMOJIS, formatBytes, mentionsToRaw, plainText } from '../lib/format'
+import { AtSign, BarChart3, CalendarClock, Mic, Paperclip, Send, Smile, Square, X, Type } from 'lucide-react'
+import { formatBytes, laterTimes, mentionsToRaw, plainText } from '../lib/format'
+import { api } from '../lib/api'
+import { EmojiGrid, EmojiManager } from './CustomEmoji'
+import { GifPicker } from './GifPicker'
 import { useStore } from '../lib/store'
 import { socket } from '../lib/socket'
-import { getSettings, useSettings } from '../lib/settings'
+import { audioConstraints, getSettings, useSettings } from '../lib/settings'
 import type { Message, User } from '../lib/types'
 import { Avatar, useClickOutside } from './ui'
 import { PollDialog } from './PollDialog'
@@ -43,6 +46,14 @@ function ComposerInner({ convoId, parentId, placeholder, allowSubject, onSent, m
   const [dragging, setDragging] = useState(false)
   const [poll, setPoll] = useState<{ question: string; options?: string[] } | null>(null)
   const [slashIdx, setSlashIdx] = useState(0)
+  const [manageEmoji, setManageEmoji] = useState(false)
+  const [gif, setGif] = useState(false)
+  const [later, setLater] = useState(false)
+  const [custom, setCustom] = useState('')
+  const [rec, setRec] = useState<{ recorder: MediaRecorder; started: number } | null>(null)
+  const [recSecs, setRecSecs] = useState(0)
+  const gifRef = useClickOutside<HTMLDivElement>(() => setGif(false), gif)
+  const laterRef = useClickOutside<HTMLDivElement>(() => setLater(false), later)
   const area = useRef<HTMLTextAreaElement>(null)
   const fileInput = useRef<HTMLInputElement>(null)
   const lastTyping = useRef(0)
@@ -110,6 +121,53 @@ function ComposerInner({ convoId, parentId, placeholder, allowSubject, onSent, m
     setFiles(f => [...f, ...incoming.filter(x => x.size <= MAX_FILE)].slice(0, 10))
   }
 
+  // Voice messages are recorded here and attached like any file, so they can be listened to before sending.
+  async function startRecording() {
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: audioConstraints() })
+      const recorder = new MediaRecorder(stream)
+      const chunks: Blob[] = []
+      recorder.ondataavailable = e => { if (e.data.size) chunks.push(e.data) }
+      recorder.onstop = () => {
+        stream.getTracks().forEach(t => t.stop())
+        setRec(null)
+        if (!chunks.length || (recorder as MediaRecorder & { cancelled?: boolean }).cancelled) return
+        const blob = new Blob(chunks, { type: recorder.mimeType || 'audio/webm' })
+        addFiles([new File([blob], `Voice message ${new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }).replace(':', '.')}.webm`, { type: blob.type.split(';')[0] })])
+      }
+      recorder.start()
+      setRec({ recorder, started: Date.now() })
+    } catch { toast('Could not use the microphone. Check that Quence Teams is allowed to use it.', 'error') }
+  }
+  function stopRecording(cancel = false) {
+    if (!rec) return
+    if (cancel) (rec.recorder as MediaRecorder & { cancelled?: boolean }).cancelled = true
+    if (rec.recorder.state !== 'inactive') rec.recorder.stop()
+  }
+  useEffect(() => {
+    if (!rec) return
+    const t = setInterval(() => { const s = Math.floor((Date.now() - rec.started) / 1000); setRecSecs(s); if (s >= 300) stopRecording() }, 500)
+    return () => clearInterval(t)
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [rec])
+  useEffect(() => () => { if (rec?.recorder.state === 'recording') stopRecording(true) }, []) // eslint-disable-line react-hooks/exhaustive-deps
+
+  async function scheduleAt(at: number) {
+    const body = mentionsToRaw(text, members)
+    if (!body.trim()) return toast('Write the message first, then pick when to send it', 'error')
+    if (files.length) return toast('Scheduled messages cannot have files yet', 'error')
+    try {
+      await api.schedule({ convoId, parentId, body, sendAt: at })
+      setText(''); setLater(false); onClearQuote?.()
+      toast(`Scheduled for ${new Date(at).toLocaleString([], { weekday: 'short', hour: 'numeric', minute: '2-digit' })}`, 'info')
+    } catch (e) { toast((e as Error).message, 'error') }
+  }
+
+  async function sendGif(g: { url: string; title: string }) {
+    setGif(false)
+    try { await api.sendGif(convoId, { url: g.url, title: g.title, parentId }); onSent?.() } catch (e) { toast((e as Error).message, 'error') }
+  }
+
   async function send() {
     if (sending || (!text.trim() && !files.length)) return
     let outgoing = text
@@ -148,6 +206,7 @@ function ComposerInner({ convoId, parentId, placeholder, allowSubject, onSent, m
       onDragLeave={e => { if (e.currentTarget === e.target) setDragging(false) }}
       onDrop={e => { e.preventDefault(); setDragging(false); if (e.dataTransfer.files.length) addFiles(e.dataTransfer.files) }}>
       {dragging && <div className="drop-hint">Drop files to attach</div>}
+      {manageEmoji && <EmojiManager onClose={() => setManageEmoji(false)} />}
       {poll && <PollDialog convoId={convoId} parentId={parentId} initialQuestion={poll.question} initialOptions={poll.options} onClose={() => setPoll(null)} />}
       {commandHints.length > 0 && !mention && (
         <div className="popup mention-pop" role="listbox" aria-label="Commands">
@@ -218,14 +277,36 @@ function ComposerInner({ convoId, parentId, placeholder, allowSubject, onSent, m
             <button className="icon-btn" title="Emoji" onClick={() => setEmoji(e => !e)}><Smile size={17} /></button>
             {emoji && (
               <div className="popup" style={{ bottom: '100%', left: 0, marginBottom: 6 }}>
-                <div className="emoji-grid">{EMOJIS.map(e => <button key={e} onClick={() => { setText(t => t + e); area.current?.focus() }}>{e}</button>)}</div>
+                <EmojiGrid onPick={e => { setText(t => t + e); area.current?.focus() }} onManage={() => { setEmoji(false); setManageEmoji(true) }} />
               </div>
             )}
           </div>
+          <div ref={gifRef} style={{ position: 'relative' }}>
+            <button className={`icon-btn gif-btn${gif ? ' active' : ''}`} title="Send a GIF" aria-label="Send a GIF" onClick={() => setGif(g => !g)}>GIF</button>
+            {gif && <div className="popup" style={{ bottom: '100%', left: 0, marginBottom: 6 }}><GifPicker onPick={g => void sendGif(g)} /></div>}
+          </div>
           <button className="icon-btn" title="Create a poll" onClick={() => setPoll({ question: '' })}><BarChart3 size={17} /></button>
           <button className="icon-btn" title="Attach files" onClick={() => fileInput.current?.click()}><Paperclip size={17} /></button>
+          {rec
+            ? <><span className="rec-dot" />{Math.floor(recSecs / 60)}:{String(recSecs % 60).padStart(2, '0')}
+                <button className="icon-btn" title="Stop and attach" aria-label="Stop recording" onClick={() => stopRecording()}><Square size={15} /></button>
+                <button className="icon-btn" title="Discard" aria-label="Discard recording" onClick={() => stopRecording(true)}><X size={15} /></button></>
+            : <button className="icon-btn" title="Record a voice message" aria-label="Record a voice message" onClick={() => void startRecording()}><Mic size={17} /></button>}
           <input ref={fileInput} type="file" multiple hidden onChange={e => { if (e.target.files) addFiles(e.target.files); e.target.value = '' }} />
           <div className="grow" />
+          <div ref={laterRef} style={{ position: 'relative' }}>
+            <button className="icon-btn" title="Schedule send" aria-label="Schedule send" onClick={() => setLater(l => !l)}><CalendarClock size={17} /></button>
+            {later && (
+              <div className="menu" style={{ bottom: '100%', right: 0, marginBottom: 6, minWidth: 220 }} role="menu">
+                {laterTimes().map(r => <button key={r.label} onClick={() => void scheduleAt(r.at)}>{r.label}</button>)}
+                <hr />
+                <div style={{ display: 'flex', gap: 6, padding: '4px 8px' }}>
+                  <input className="input" type="datetime-local" value={custom} onChange={e => setCustom(e.target.value)} style={{ minWidth: 0 }} />
+                  <button className="btn primary sm" disabled={!custom} onClick={() => void scheduleAt(new Date(custom).getTime())}>Set</button>
+                </div>
+              </div>
+            )}
+          </div>
           <button className="btn primary sm" disabled={sending || (!text.trim() && !files.length)} onClick={send} aria-label="Send"><Send size={15} /></button>
         </div>
       </div>

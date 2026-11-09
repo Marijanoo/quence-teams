@@ -18,6 +18,11 @@ export class CallSession {
   private screenTrack: MediaStreamTrack | null = null
   private screenStream: MediaStream | null = null
   local: MediaStream
+  hands = new Set<string>()
+  reactions: { id: number; userId: string; emoji: string; at: number }[] = []
+  chat: { userId: string; text: string; at: number }[] = []
+  onChat: (line: { userId: string; text: string; at: number }) => void = () => {}
+  private reactionId = 1
   onChange: () => void = () => {}
   onError: (msg: string) => void = () => {}
   closed = false
@@ -29,6 +34,8 @@ export class CallSession {
       socket.on('call.peer-joined', d => { if (d.room === room) this.addPeer(d.userId, false) }),
       socket.on('call.peer-left', d => { if (d.room === room) this.removePeer(d.userId) }),
       socket.on('call.signal', d => { if (d.room === room) void this.onSignal(d.from, d.signal) }),
+      socket.on('call.event', d => { if (d.room === room) this.onEvent(d.from, d.kind, d.value, d.at) }),
+      socket.on('call.peer-left', d => { if (d.room === room && this.hands.delete(d.userId)) this.onChange() }),
       socket.on('call.error', d => { if (d.room === room) this.onError(d.error) }),
       socket.on('call.kicked', d => { if (d.room === room) { this.onError('You joined this call from another window'); this.leave() } }),
       // the socket dropped: peers keep their direct media, but we need to re-announce ourselves on reconnect
@@ -130,6 +137,50 @@ export class CallSession {
     if (!peer) return
     peer.pc.close()
     this.peers.delete(userId)
+    this.onChange()
+  }
+
+  private onEvent(from: string, kind: 'hand' | 'react' | 'chat', value: unknown, at: number) {
+    if (kind === 'hand') { if (value) this.hands.add(from); else this.hands.delete(from) }
+    else if (kind === 'react') this.addReaction(from, String(value))
+    else { const line = { userId: from, text: String(value), at }; this.chat.push(line); this.onChat(line) }
+    this.onChange()
+  }
+
+  private addReaction(userId: string, emoji: string) {
+    const r = { id: this.reactionId++, userId, emoji, at: Date.now() }
+    this.reactions = [...this.reactions.filter(x => Date.now() - x.at < 4000), r]
+    setTimeout(() => { this.reactions = this.reactions.filter(x => x.id !== r.id); if (!this.closed) this.onChange() }, 4000)
+  }
+
+  // Hand raises, reactions and chat lines go through the server to everyone else in the call.
+  setHand(on: boolean) {
+    if (on) this.hands.add(this.meId); else this.hands.delete(this.meId)
+    socket.send('call.event', { room: this.room, kind: 'hand', value: on })
+    this.onChange()
+  }
+  react(emoji: string) { this.addReaction(this.meId, emoji); socket.send('call.event', { room: this.room, kind: 'react', value: emoji }); this.onChange() }
+  say(text: string) {
+    const line = { userId: this.meId, text, at: Date.now() }
+    this.chat.push(line)
+    socket.send('call.event', { room: this.room, kind: 'chat', value: text })
+    this.onChange()
+  }
+
+  // Background blur is done by the browser itself, where the camera supports it (recent Chrome and Edge on some systems).
+  get canBlur(): boolean {
+    const track = this.local.getVideoTracks()[0] as (MediaStreamTrack & { getCapabilities?: () => Record<string, unknown> }) | undefined
+    const cap = track?.getCapabilities?.().backgroundBlur
+    return Array.isArray(cap) && cap.includes(true)
+  }
+  get blurred(): boolean {
+    const track = this.local.getVideoTracks()[0]
+    return !!(track?.getSettings() as { backgroundBlur?: boolean } | undefined)?.backgroundBlur
+  }
+  async setBlur(on: boolean) {
+    const track = this.local.getVideoTracks()[0]
+    if (!track) return
+    try { await track.applyConstraints({ advanced: [{ backgroundBlur: on } as MediaTrackConstraintSet] }) } catch { this.onError('Background blur is not supported by this camera') }
     this.onChange()
   }
 

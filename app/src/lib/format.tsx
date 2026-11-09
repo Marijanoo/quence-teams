@@ -1,6 +1,8 @@
 import type { ReactNode } from 'react'
 import type { User } from './types'
 import { getSettings } from './settings'
+import { emojiUrl } from './api'
+import { useStore } from './store'
 
 const AVATAR_COLORS = ['#7cc4a4', '#8fb4ee', '#c9a0e8', '#ef8f8f', '#e8a56c', '#6fc7d4', '#a7c96a']
 export const avatarColor = (u: Pick<User, 'color'> | undefined) => AVATAR_COLORS[(u?.color ?? 0) % AVATAR_COLORS.length]
@@ -52,7 +54,7 @@ export function plainText(body: string, users: Record<string, User>): string {
 }
 
 // Small markdown subset rendered as React nodes (never as raw HTML, so message text cannot inject markup).
-const INLINE = /(`[^`\n]+`)|(\*\*[^*\n]+\*\*)|(\*[^*\n]+\*)|(~~[^~\n]+~~)|(<@(?:[0-9a-f-]{36}|everyone)>)|(https?:\/\/[^\s<]+)/g
+const INLINE = /(`[^`\n]+`)|(\*\*[^*\n]+\*\*)|(\*[^*\n]+\*)|(~~[^~\n]+~~)|(<@(?:[0-9a-f-]{36}|everyone)>)|(:[a-z0-9_]{2,32}:)|(https?:\/\/[^\s<]+)/g
 
 function renderInline(text: string, users: Record<string, User>, meId: string | undefined, keyBase: string): ReactNode[] {
   const out: ReactNode[] = []
@@ -71,6 +73,10 @@ function renderInline(text: string, users: Record<string, User>, meId: string | 
       const id = tok.slice(2, -1)
       const name = id === 'everyone' ? 'everyone' : users[id]?.name ?? 'unknown'
       out.push(<span key={key} className={`mention${id === meId || id === 'everyone' ? ' mention-me' : ''}`}>@{name}</span>)
+    } else if (tok.startsWith(':')) {
+      const name = tok.slice(1, -1)
+      if (useStore.getState().customEmoji.includes(name)) out.push(<img key={key} className="cemoji" src={emojiUrl(name)} alt={tok} title={tok} />)
+      else out.push(tok)
     } else {
       const url = tok.replace(/[.,;:!?)]+$/, '')
       out.push(<a key={key} href={url} target="_blank" rel="noopener noreferrer">{url}</a>)
@@ -135,3 +141,21 @@ export function emojiOnlyCount(body: string): number {
   }
   return n
 }
+
+// The first web address in a message, for the link preview card.
+export function firstUrl(body: string): string | null {
+  const m = /https?:\/\/[^\s<]+/.exec(body.replace(/```[\s\S]*?```/g, ''))
+  return m ? m[0].replace(/[.,;:!?)]+$/, '') : null
+}
+
+// "Later" choices for reminders and scheduled messages.
+export function laterTimes(): { label: string; at: number }[] {
+  const t = Date.now()
+  const tomorrow = new Date(); tomorrow.setDate(tomorrow.getDate() + 1); tomorrow.setHours(9, 0, 0, 0)
+  const monday = new Date(); monday.setDate(monday.getDate() + ((8 - monday.getDay()) % 7 || 7)); monday.setHours(9, 0, 0, 0)
+  return [
+    { label: 'In 20 minutes', at: t + 20 * 60_000 }, { label: 'In 1 hour', at: t + 3600_000 }, { label: 'In 3 hours', at: t + 3 * 3600_000 },
+    { label: 'Tomorrow at 9:00', at: tomorrow.getTime() }, { label: 'Next Monday at 9:00', at: monday.getTime() }
+  ]
+}
+

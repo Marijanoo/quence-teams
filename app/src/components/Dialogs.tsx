@@ -1,11 +1,11 @@
 import { useEffect, useState } from 'react'
 import { Crown, LogOut, Trash2, UserMinus, UserPlus } from 'lucide-react'
-import { api } from '../lib/api'
+import { api, getServer } from '../lib/api'
 import { askConfirm, chatTitle, useStore } from '../lib/store'
-import type { Meeting, Team, TeamDetail } from '../lib/types'
+import type { Meeting, Team, TeamDetail, Webhook } from '../lib/types'
 import { Avatar, Dialog, PeoplePicker } from './ui'
 import { formatTime } from '../lib/format'
-import { useSettings } from '../lib/settings'
+import { getSettings, useSettings } from '../lib/settings'
 
 export function NewChatDialog({ onClose }: { onClose: () => void }) {
   const [picked, setPicked] = useState<string[]>([])
@@ -220,6 +220,46 @@ export function NewMeetingDialog({ initialStart, initialEnd, meeting, onClose }:
   const [end, setEnd] = useState(toLocalInput(meeting?.endsAt ?? initialEnd ?? start0 + defaultLength * 60_000))
   const [attendees, setAttendees] = useState<string[]>(() => meeting ? meeting.attendees.filter(a => a.user.id !== meId).map(a => a.user.id) : [])
   const [busy, setBusy] = useState(false)
+  const [recur, setRecur] = useState<string>(meeting?.recur ?? 'none')
+  const [until, setUntil] = useState(meeting?.recurUntil ? toLocalInput(meeting.recurUntil).slice(0, 10) : '')
+  const users = useStore(s => s.users)
+  const [busyMap, setBusyMap] = useState<Record<string, [number, number][]> | null>(null)
+
+  // Who is free: only time ranges come back from the server, never the titles of other people's meetings.
+  const dayStart = (t: number) => { const d = new Date(t); d.setHours(0, 0, 0, 0); return d.getTime() }
+  useEffect(() => {
+    const t = new Date(start).getTime()
+    if (!t || !attendees.length) { setBusyMap(null); return }
+    let alive = true
+    api.freeBusy([meId, ...attendees], dayStart(t), dayStart(t) + 86_400_000).then(m => { if (alive) setBusyMap(m) }).catch(() => { if (alive) setBusyMap(null) })
+    return () => { alive = false }
+  }, [start, attendees, meId])
+  const conflicts = busyMap ? Object.entries(busyMap).filter(([id, ranges]) => id !== meeting?.organizer.id && ranges.some(([a, b]) => a < new Date(end).getTime() && b > new Date(start).getTime() && !(meeting && a === meeting.startsAt && b === meeting.endsAt))).map(([id]) => users[id]?.name ?? 'Someone') : []
+
+  // The first half hour in the next two weeks of working hours when everyone invited is free.
+  async function findTime() {
+    const len = Math.max(15 * 60_000, new Date(end).getTime() - new Date(start).getTime() || 30 * 60_000)
+    const from = Math.max(Date.now(), dayStart(Date.now()))
+    const ids = [meId, ...attendees]
+    const all: [number, number][] = []
+    for (let off = 0; off < 14; off += 7) {
+      const part = await api.freeBusy(ids, from + off * 86_400_000, from + (off + 7) * 86_400_000).catch(() => null)
+      if (!part) return toast('Could not check calendars', 'error')
+      for (const r of Object.values(part)) all.push(...r)
+    }
+    const { workStart, workEnd } = getSettings()
+    for (let d = 0; d < 14; d++) {
+      const day = new Date(from); day.setDate(day.getDate() + d)
+      if ([0, 6].includes(day.getDay())) continue
+      for (let m = workStart * 60; m + len / 60_000 <= workEnd * 60; m += 30) {
+        const s = new Date(day); s.setHours(0, m, 0, 0)
+        const a = s.getTime(), b = a + len
+        if (a < Date.now()) continue
+        if (!all.some(([x, y]) => x < b && y > a)) { setStart(toLocalInput(a)); setEnd(toLocalInput(b)); return }
+      }
+    }
+    toast('No shared free time in the next two weeks', 'error')
+  }
 
   async function submit() {
     const s = new Date(start).getTime(), e = new Date(end).getTime()
@@ -227,9 +267,10 @@ export function NewMeetingDialog({ initialStart, initialEnd, meeting, onClose }:
     setBusy(true)
     try {
       const m = meeting
-        ? await api.updateMeeting(meeting.id, { title, description, startsAt: s, endsAt: e, attendeeIds: attendees })
-        : await api.createMeeting({ title, description, startsAt: s, endsAt: e, attendeeIds: attendees })
-      useStore.setState(st => ({ meetings: [...st.meetings.filter(x => x.id !== m.id), m].sort((a, b) => a.startsAt - b.startsAt) }))
+        ? await api.updateMeeting(meeting.id, { title, description, startsAt: s, endsAt: e, attendeeIds: attendees, recur, recurUntil: recur === 'none' || !until ? null : new Date(until + 'T23:59').getTime() })
+        : await api.createMeeting({ title, description, startsAt: s, endsAt: e, attendeeIds: attendees, recur, recurUntil: recur === 'none' || !until ? null : new Date(until + 'T23:59').getTime() })
+      void m
+      await useStore.getState().reloadMeetings()
       onClose()
     } catch (err) { toast((err as Error).message, 'error'); setBusy(false) }
   }
@@ -249,11 +290,26 @@ export function NewMeetingDialog({ initialStart, initialEnd, meeting, onClose }:
         }} /></label>
         <label className="field">Ends<input className="input" type="datetime-local" value={end} onChange={e => setEnd(e.target.value)} /></label>
       </div>
+      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10 }}>
+        <label className="field">Repeats
+          <select className="input" value={recur} onChange={e => setRecur(e.target.value)}>
+            <option value="none">Does not repeat</option><option value="daily">Every day</option><option value="weekdays">Every weekday</option>
+            <option value="weekly">Every week</option><option value="monthly">Every month</option>
+          </select>
+        </label>
+        {recur !== 'none' && <label className="field">Until (optional)<input className="input" type="date" value={until} onChange={e => setUntil(e.target.value)} /></label>}
+      </div>
       <label className="field">Details (optional)
         <textarea className="input" rows={2} value={description} onChange={e => setDescription(e.target.value)} />
       </label>
       <div className="section-label" style={{ padding: 0 }}>Invite people</div>
       <PeoplePicker selected={attendees} onChange={setAttendees} />
+      {attendees.length > 0 && (
+        <div className={`busy-note${conflicts.length ? ' warn' : ''}`} role="status">
+          {conflicts.length ? `Busy at that time: ${conflicts.join(', ')}.` : busyMap ? 'Everyone is free at that time.' : 'Checking calendars…'}
+          <button className="btn sm" type="button" onClick={() => void findTime()}>Find a time</button>
+        </div>
+      )}
       <div className="actions">
         <button className="btn" onClick={onClose}>Cancel</button>
         <button className="btn primary" disabled={!title.trim() || busy} onClick={submit}>{meeting ? 'Save' : 'Schedule'}</button>
@@ -270,12 +326,13 @@ export function MeetingDialog({ meeting, onClose, onEdit }: { meeting: Meeting; 
   const mine = meeting.attendees.find(a => a.user.id === me.id)
   const isOrganizer = meeting.organizer.id === me.id
   const start = new Date(meeting.startsAt), end = new Date(meeting.endsAt)
-  const respond = (r: string) => api.respondMeeting(meeting.id, r).then(m => { useStore.setState(s => ({ meetings: s.meetings.map(x => x.id === m.id ? m : x) })); onClose() }).catch(e => toast(e.message, 'error'))
+  const respond = (r: string) => api.respondMeeting(meeting.id, r).then(() => { void useStore.getState().reloadMeetings(); onClose() }).catch(e => toast(e.message, 'error'))
 
   return (
     <Dialog title={meeting.title} onClose={onClose}>
       <div className="muted">
         {start.toLocaleDateString(undefined, { weekday: 'long', month: 'long', day: 'numeric' })} · {formatTime(meeting.startsAt)} – {formatTime(meeting.endsAt)}
+        {meeting.recur && meeting.recur !== 'none' ? <span> · repeats {({ daily: 'every day', weekdays: 'every weekday', weekly: 'every week', monthly: 'every month' } as Record<string, string>)[meeting.recur]}</span> : null}
         {live?.length ? <span style={{ color: 'var(--success)', marginLeft: 8 }}>● {live.length} in the meeting</span> : null}
       </div>
       <div>Organised by <b>{meeting.organizer.name}</b>{end.getTime() < Date.now() ? ' · ended' : ''}</div>
@@ -290,7 +347,7 @@ export function MeetingDialog({ meeting, onClose, onEdit }: { meeting: Meeting; 
       </div>
       <div className="actions" style={{ flexWrap: 'wrap' }}>
         {isOrganizer && onEdit && <button className="btn" onClick={onEdit}>Edit</button>}
-        {isOrganizer && <button className="btn danger" onClick={async () => { if (await askConfirm({ title: 'Cancel this meeting?', message: 'It will be removed from everyone\'s calendar.', confirmLabel: 'Cancel meeting', danger: true })) void api.deleteMeeting(meeting.id).then(() => { useStore.setState(s => ({ meetings: s.meetings.filter(m => m.id !== meeting.id) })); onClose() }).catch(e => toast(e.message, 'error')) }}>Cancel meeting</button>}
+        {isOrganizer && <button className="btn danger" onClick={async () => { if (await askConfirm({ title: meeting.recur && meeting.recur !== 'none' ? 'Cancel the whole series?' : 'Cancel this meeting?', message: 'It will be removed from everyone\'s calendar.', confirmLabel: 'Cancel meeting', danger: true })) void api.deleteMeeting(meeting.id).then(() => { void useStore.getState().reloadMeetings(); onClose() }).catch(e => toast(e.message, 'error')) }}>Cancel meeting</button>}
         {mine && !isOrganizer && (
           <>
             <button className="btn" onClick={() => respond('declined')}>Decline</button>
@@ -299,6 +356,48 @@ export function MeetingDialog({ meeting, onClose, onEdit }: { meeting: Meeting; 
           </>
         )}
         <button className="btn primary" onClick={() => { onClose(); joinCall(meeting.id, meeting.title) }}>Join</button>
+      </div>
+    </Dialog>
+  )
+}
+
+// Incoming webhooks: each one posts into this channel as its own bot. Anyone with the address can post, so keep it secret.
+export function WebhooksDialog({ channelId, channelName, onClose }: { channelId: string; channelName: string; onClose: () => void }) {
+  const toast = useStore(s => s.toast)
+  const [hooks, setHooks] = useState<Webhook[] | null>(null)
+  const [name, setName] = useState('')
+  const base = getServer() || location.origin
+  const load = () => api.webhooks(channelId).then(setHooks).catch(e => { setHooks([]); toast(e.message, 'error') })
+  useEffect(() => { void load() }, [channelId]) // eslint-disable-line react-hooks/exhaustive-deps
+
+  async function add() {
+    if (!name.trim()) return
+    try { await api.addWebhook(channelId, name.trim()); setName(''); await load() } catch (e) { toast((e as Error).message, 'error') }
+  }
+  const copy = (h: Webhook) => navigator.clipboard?.writeText(base + h.path).then(() => toast('Webhook address copied', 'info')).catch(() => toast('Could not copy, select the address instead', 'error'))
+
+  return (
+    <Dialog title={`Webhooks for #${channelName}`} onClose={onClose} wide>
+      <div style={{ display: 'grid', gap: 12 }}>
+        <div className="muted" style={{ fontSize: 13 }}>
+          Send a POST with JSON like <code>{'{"text": "Build passed"}'}</code> to a webhook address and it appears here as a message from that bot. Links and @mentions work.
+        </div>
+        <div style={{ display: 'flex', gap: 8 }}>
+          <input className="input" placeholder="Name, for example Deploys" value={name} maxLength={40} onChange={e => setName(e.target.value)} onKeyDown={e => { if (e.key === 'Enter') void add() }} />
+          <button className="btn primary" disabled={!name.trim()} onClick={add}>Create</button>
+        </div>
+        {hooks === null && <div className="muted">Loading…</div>}
+        {hooks?.map(h => (
+          <div key={h.id} className="hook-row">
+            <div style={{ minWidth: 0, flex: 1 }}>
+              <b>{h.name}</b>
+              <div className="hook-url">{base}{h.path}</div>
+            </div>
+            <button className="btn sm" onClick={() => copy(h)}>Copy</button>
+            <button className="btn sm danger" onClick={async () => { if (await askConfirm({ title: `Delete ${h.name}?`, message: 'Anything still posting to this address will stop working.', confirmLabel: 'Delete', danger: true })) { await api.removeWebhook(channelId, h.id).catch(e => toast(e.message, 'error')); await load() } }}>Delete</button>
+          </div>
+        ))}
+        {hooks?.length === 0 && <div className="muted">No webhooks yet.</div>}
       </div>
     </Dialog>
   )

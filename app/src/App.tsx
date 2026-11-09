@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react'
 import { App as CapacitorApp } from '@capacitor/app'
 import { isNative } from './lib/platform'
 import { Bell, Calendar as CalendarIcon, MessageSquare, Phone, PhoneOff, X } from 'lucide-react'
-import { api, setUnauthorizedHandler } from './lib/api'
+import { setUnauthorizedHandler } from './lib/api'
 import { restoreSession, useStore } from './lib/store'
 import { socket } from './lib/socket'
 import type { CallLog, Meeting, Team, View } from './lib/types'
@@ -34,6 +34,8 @@ const RAIL: { id: View; label: string; icon: typeof Bell }[] = [
   { id: 'calendar', label: 'Calendar', icon: CalendarIcon },
   { id: 'calls', label: 'Calls', icon: Phone }
 ]
+
+const firedReminders = new Set<string>()
 
 export default function App() {
   const me = useStore(s => s.me)
@@ -82,8 +84,7 @@ function Shell() {
 
   // Upcoming meetings for the sidebar and reminders.
   useEffect(() => {
-    api.meetings(Date.now() - 86_400_000, Date.now() + 45 * 86_400_000)
-      .then(list => useStore.setState({ meetings: list })).catch(() => {})
+    void useStore.getState().reloadMeetings()
   }, [])
 
   // Ask for desktop notification permission on the first interaction.
@@ -105,12 +106,12 @@ function Shell() {
   const remind = useSettings().meetingReminder
   useEffect(() => {
     if (!remind) return
-    const fired = new Set<string>()
     const t = setInterval(() => {
       for (const m of meetings) {
         const until = m.startsAt - Date.now()
-        if (until > 0 && until <= remind * 60_000 && !fired.has(m.id)) {
-          fired.add(m.id)
+        const key = m.occId ?? m.id
+        if (until > 0 && until <= remind * 60_000 && !firedReminders.has(key)) {
+          firedReminders.add(key)
           toast(`“${m.title}” starts in ${Math.max(1, Math.round(until / 60_000))} min`)
         }
       }

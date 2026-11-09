@@ -1,3 +1,4 @@
+import { EmojiManager } from './CustomEmoji'
 import { useEffect, useRef, useState, type ReactNode } from 'react'
 import { Accessibility, Bell, Calendar, Camera, Headphones, Info, Keyboard, MessageSquare, Palette, Shield, Trash2, User as UserIcon, X } from 'lucide-react'
 import { api } from '../lib/api'
@@ -158,17 +159,28 @@ function Notifications({ s }: { s: Settings }) {
             options={[[0, 'Off'], [1, '1 minute before'], [5, '5 minutes before'], [10, '10 minutes before'], [15, '15 minutes before'], [30, '30 minutes before']]} />
         </Row>
       </Group>
+      <Group title="Quiet hours">
+        <Toggle k="quietEnabled" title="Silence message notifications on a schedule" hint="No sounds or desktop notifications for messages. Calls still ring." s={s} />
+        {s.quietEnabled && (
+          <>
+            <Row title="From"><Pick label="Quiet hours start" value={s.quietStart} onChange={quietStart => setSettings({ quietStart })} options={Array.from({ length: 24 }, (_, h) => [h, `${String(h).padStart(2, '0')}:00`] as [number, string])} /></Row>
+            <Row title="Until"><Pick label="Quiet hours end" value={s.quietEnd} onChange={quietEnd => setSettings({ quietEnd })} options={Array.from({ length: 24 }, (_, h) => [h, `${String(h).padStart(2, '0')}:00`] as [number, string])} /></Row>
+            <Toggle k="quietWeekends" title="Quiet all day on weekends" s={s} />
+          </>
+        )}
+      </Group>
       <Group title="Sounds">
         <Toggle k="soundMessage" title="Play a sound for new messages" s={s} />
         <Toggle k="soundCall" title="Ring for incoming calls" s={s} />
         <Row title="Preview ringtone"><button className="btn sm" onClick={() => beep('ring')}>Play</button></Row>
       </Group>
-      <p className="set-hint">Notifications are muted while your status is Do not disturb.</p>
+      <p className="set-hint">Notifications are muted while your status is Do not disturb. Muted chats and channels only notify you when someone @mentions you.</p>
     </>
   )
 }
 
 function Chat({ s }: { s: Settings }) {
+  const [emojiOpen, setEmojiOpen] = useState(false)
   return (
     <>
       <Group title="Writing">
@@ -181,7 +193,12 @@ function Chat({ s }: { s: Settings }) {
         <Row title="Message density"><Pick label="Message density" value={s.density} onChange={density => setSettings({ density })} options={[['comfortable', 'Comfortable'], ['compact', 'Compact']]} /></Row>
         <Row title="Message text size" hint={`${s.textSize}%`}><input type="range" min={85} max={140} step={5} value={s.textSize} aria-label="Message text size" onChange={e => setSettings({ textSize: Number(e.target.value) })} /></Row>
         <Toggle k="bigEmoji" title="Show emoji bigger when they are alone in a message" hint="One emoji is the biggest, four are normal size" s={s} />
+        <Toggle k="linkPreviews" title="Show previews for links" hint="The server fetches the page, so your address is never shared with the site" s={s} />
       </Group>
+      <Group title="Emoji">
+        <Row title="Custom emoji" hint="Images everyone can use as :name: or as a reaction"><button className="btn sm" onClick={() => setEmojiOpen(true)}>Manage</button></Row>
+      </Group>
+      {emojiOpen && <EmojiManager onClose={() => setEmojiOpen(false)} />}
     </>
   )
 }

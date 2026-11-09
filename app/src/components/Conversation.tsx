@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
-import { ArrowLeft, FileText, Hash, Lock, Phone, Settings, Star, Users, Video } from 'lucide-react'
+import { ArrowLeft, Bell, BellOff, FileText, Hash, Lock, Megaphone, Phone, Plug, Settings, Star, Users, Video } from 'lucide-react'
 import { api, fileUrl } from '../lib/api'
 import { formatBytes, formatDay, formatShort, sameDay } from '../lib/format'
 import { askConfirm, chatTitle, useStore } from '../lib/store'
@@ -8,6 +8,7 @@ import type { Message, TeamDetail, User } from '../lib/types'
 import { Composer } from './Composer'
 import { MessageItem } from './MessageItem'
 import { GroupAvatar, MenuButton } from './ui'
+import { WebhooksDialog } from './Dialogs'
 
 type Tab = 'posts' | 'files' | 'pins'
 
@@ -45,6 +46,9 @@ export function Conversation({ onBack, onTeamSettings, onChatMembers }: { onBack
   const callParticipants = useStore(s => s.calls[selection.convoId])
   const isFav = useStore(s => s.favorites.includes(selection.convoId))
   const toggleFavorite = useStore(s => s.toggleFavorite)
+  const isMuted = useStore(s => s.muted.includes(selection.convoId))
+  const toggleMute = useStore(s => s.toggleMute)
+  const [hooksOpen, setHooksOpen] = useState(false)
 
   const [tab, setTab] = useState<Tab>('posts')
   const [teamDetail, setTeamDetail] = useState<TeamDetail | null>(null)
@@ -73,6 +77,9 @@ export function Conversation({ onBack, onTeamSettings, onChatMembers }: { onBack
 
   const title = chat ? chatTitle(chat, me.id) : channel?.name ?? ''
   const isOwner = team?.role === 'owner'
+  const announcement = channel?.posting === 'owners'
+  const canPost = !announcement || isOwner || channel?.createdBy === me.id
+  const dmOther = chat?.type === 'direct' ? chat.members.find(m => m.id !== me.id) : undefined
   const messages = cache?.messages ?? []
 
   // ----- scrolling -----
@@ -144,15 +151,25 @@ export function Conversation({ onBack, onTeamSettings, onChatMembers }: { onBack
           {channel?.description && <span className="muted" style={{ fontSize: 12.5, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{channel.description}</span>}
           <button className={`icon-btn${isFav ? ' active' : ''}`} onClick={() => void toggleFavorite(selection.convoId)} aria-pressed={isFav}
             title={isFav ? 'Remove from favorites' : 'Add to favorites'} aria-label={isFav ? 'Remove from favorites' : 'Add to favorites'}><Star size={17} fill={isFav ? 'currentColor' : 'none'} /></button>
+          {isMuted && <BellOff size={15} className="muted" aria-label="Muted" />}
+          {announcement && <span className="badge" title="Only owners can start posts here"><Megaphone size={12} /> Announcements</span>}
           <div className="grow" />
           {inCall ? <span className="badge" style={{ background: 'var(--success)', color: 'oklch(0.2 0.02 160)' }}>● {inCall} in call</span> : null}
           <button className="btn sm" onClick={startMeeting} title={selection.kind === 'channel' ? 'Start a meeting in this channel' : 'Start a call'}>
             {selection.kind === 'channel' ? <Video size={15} /> : <Phone size={15} />}{inCall ? 'Join' : selection.kind === 'channel' ? 'Meet' : 'Call'}
           </button>
           {chat?.type === 'group' && <button className="icon-btn" title="People" onClick={() => onChatMembers(chat.id)}><Users size={17} /></button>}
+          {chat && (
+            <MenuButton button={<button className="icon-btn" aria-label="Chat options"><Settings size={17} /></button>}
+              items={[{ label: isMuted ? 'Unmute notifications' : 'Mute notifications', icon: isMuted ? <Bell size={15} /> : <BellOff size={15} />, onClick: () => void toggleMute(selection.convoId) }]} />
+          )}
           {team && (
             <MenuButton button={<button className="icon-btn" aria-label="Channel options"><Settings size={17} /></button>}
               items={[
+                { label: isMuted ? 'Unmute notifications' : 'Mute notifications', icon: isMuted ? <Bell size={15} /> : <BellOff size={15} />, onClick: () => void toggleMute(selection.convoId) },
+                { label: announcement ? 'Let everyone post' : 'Make it an announcement channel', icon: <Megaphone size={15} />, hidden: !isOwner && channel?.createdBy !== me.id,
+                  onClick: () => { if (channel) void api.setChannelPosting(channel.id, announcement ? 'all' : 'owners').then(() => useStore.getState().refreshTeams()).catch(e => toast(e.message, 'error')) } },
+                { label: 'Webhooks', icon: <Plug size={15} />, hidden: !isOwner && channel?.createdBy !== me.id, onClick: () => setHooksOpen(true) },
                 { label: 'Manage team', icon: <Users size={15} />, onClick: () => onTeamSettings(team.id) },
                 { label: 'Delete channel', danger: true, hidden: !isOwner || team.channels[0]?.id === channel?.id,
                   onClick: async () => { if (channel && await askConfirm({ title: `Delete #${channel.name}?`, message: 'All messages and files in this channel will be permanently deleted.', confirmLabel: 'Delete channel', danger: true })) await api.deleteChannel(channel.id).catch(e => toast(e.message, 'error')) } }
@@ -195,8 +212,16 @@ export function Conversation({ onBack, onTeamSettings, onChatMembers }: { onBack
             </div>
           </div>
           <div className="typing" aria-live="polite">{typingText}</div>
-          <Composer convoId={selection.convoId} placeholder={selection.kind === 'channel' ? `Start a new post in #${title}` : 'Type a message'}
-            allowSubject={selection.kind === 'channel'} members={members} quote={quote} onClearQuote={() => setQuote(null)} />
+          {dmOther?.oooUntil && (
+            <div className="ooo-banner" role="status">
+              <b>{dmOther.name}</b> is out of office until {new Date(dmOther.oooUntil).toLocaleDateString([], { weekday: 'short', month: 'short', day: 'numeric' })}
+              {dmOther.oooMsg ? <>: “{dmOther.oooMsg}”</> : null}
+            </div>
+          )}
+          {canPost
+            ? <Composer convoId={selection.convoId} placeholder={selection.kind === 'channel' ? `Start a new post in #${title}` : 'Type a message'}
+                allowSubject={selection.kind === 'channel'} members={members} quote={quote} onClearQuote={() => setQuote(null)} />
+            : <div className="ooo-banner" role="status"><Megaphone size={14} /> Only the team owner can post in this channel. You can reply to a post in its thread.</div>}
         </>
       )}
 
@@ -223,6 +248,7 @@ export function Conversation({ onBack, onTeamSettings, onChatMembers }: { onBack
         </div>
       )}
 
+      {hooksOpen && channel && <WebhooksDialog channelId={channel.id} channelName={channel.name} onClose={() => setHooksOpen(false)} />}
       {lightbox && <div className="lightbox" onClick={() => setLightbox(null)}><img src={lightbox} alt="" /></div>}
     </div>
   )

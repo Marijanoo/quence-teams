@@ -1,6 +1,6 @@
 export type Presence = 'available' | 'busy' | 'dnd' | 'away' | 'offline'
 
-export interface User { id: string; name: string; email: string; title: string; statusMsg: string; color: number; avatar: number }
+export interface User { id: string; name: string; email: string; title: string; statusMsg: string; color: number; avatar: number; oooUntil?: number | null; oooMsg?: string; bot?: boolean }
 export interface Quote { id: string; convoId: string; author: User | null; snippet: string; deleted: boolean; hasAttachment: boolean }
 export interface Reaction { emoji: string; userIds: string[] }
 export interface PollOption { id: string; text: string; userIds: string[] }
@@ -17,7 +17,7 @@ export interface Message {
 }
 
 export interface Channel {
-  id: string; teamId: string; name: string; description: string; isPrivate: boolean
+  id: string; teamId: string; name: string; description: string; isPrivate: boolean; posting?: 'all' | 'owners'; createdBy?: string
   unread: number; mentions: number
 }
 export interface Team { id: string; name: string; description: string; role: 'owner' | 'member'; channels: Channel[] }
@@ -32,6 +32,7 @@ export interface Chat {
 export interface Meeting {
   id: string; title: string; description: string; convoId: string | null
   organizer: User; startsAt: number; endsAt: number
+  recur?: 'none' | 'daily' | 'weekdays' | 'weekly' | 'monthly'; recurUntil?: number | null; occId?: string
   attendees: { user: User; response: 'none' | 'accepted' | 'declined' | 'tentative' }[]
 }
 
@@ -48,6 +49,12 @@ export interface CallLog {
   status: 'joined' | 'missed' | 'declined'; participants: User[]; canCallBack: boolean
 }
 
+export interface Scheduled { id: string; convoId: string; parentId: string | null; body: string; sendAt: number; where: string }
+export interface Reminder { id: string; messageId: string | null; convoId: string | null; text: string; remindAt: number; message?: Message | null }
+export interface LinkCard { url: string; title: string; description: string; site: string }
+export interface Webhook { id: string; name: string; createdAt: number; path: string }
+export interface EditVersion { body: string; at: number }
+
 export type View = 'activity' | 'chat' | 'calendar' | 'calls'
-export type QuickView = 'mentions' | 'drafts' | 'saved'
+export type QuickView = 'mentions' | 'drafts' | 'saved' | 'scheduled'
 export type Selection = { convoId: string; kind: 'channel' | 'chat'; teamId?: string }

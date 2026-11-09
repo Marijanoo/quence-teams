@@ -33,7 +33,7 @@ export function Search() {
   return (
     <div className="search" ref={ref}>
       <SearchIcon size={16} className="search-icon" />
-      <input className="input" type="search" placeholder="Search messages" value={q} aria-label="Search messages"
+      <input className="input" type="search" placeholder="Search messages  (from: in: has:file before:)" value={q} aria-label="Search messages"
         onChange={e => { setQ(e.target.value); setOpen(true) }} onFocus={() => setOpen(true)}
         onKeyDown={e => { if (e.key === 'Escape') { setOpen(false); (e.target as HTMLInputElement).blur() } }} />
       {open && q.trim() && (

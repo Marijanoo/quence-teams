@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { Check, ChevronLeft, ChevronRight, ExternalLink, Pencil, Plus, Trash2, Video, CalendarDays } from 'lucide-react'
+import { Repeat, Check, ChevronLeft, ChevronRight, ExternalLink, Pencil, Plus, Trash2, Video, CalendarDays } from 'lucide-react'
 import { api } from '../lib/api'
 import { formatHour, formatTime } from '../lib/format'
 import { useSettings } from '../lib/settings'
@@ -71,10 +71,8 @@ export function Calendar({ onNew, onOpen, onEdit }: { onNew: (start?: number, en
 
   useEffect(() => {
     const from = weekStart, to = weekStart + 8 * DAY
-    api.meetings(from, to).then(list => useStore.setState(s => ({
-      meetings: [...s.meetings.filter(m => m.endsAt < from || m.startsAt > to), ...list].sort((a, b) => a.startsAt - b.startsAt)
-    }))).catch(e => toast(e.message, 'error'))
-  }, [weekStart, toast])
+    void useStore.getState().reloadMeetings({ from, to })
+  }, [weekStart])
 
   useEffect(() => { const t = setInterval(() => setNow(Date.now()), 60_000); return () => clearInterval(t) }, [])
 
@@ -82,9 +80,9 @@ export function Calendar({ onNew, onOpen, onEdit }: { onNew: (start?: number, en
   useEffect(() => { document.getElementById('cal-scroll')?.scrollTo({ top: Math.max(0, cfg.workStart - 1) * HOUR }) }, [cfg.workStart])
 
   const header = new Date(weekStart).toLocaleDateString(undefined, { month: 'long', year: 'numeric' })
-  const shown = useMemo(() => drag ? meetings.map(m => m.id === drag.id ? { ...m, startsAt: drag.s, endsAt: drag.e } : m) : meetings, [meetings, drag])
+  const shown = useMemo(() => drag ? meetings.map(m => (m.occId ?? m.id) === drag.id ? { ...m, startsAt: drag.s, endsAt: drag.e } : m) : meetings, [meetings, drag])
 
-  const replace = (m: Meeting) => useStore.setState(s => ({ meetings: [...s.meetings.filter(x => x.id !== m.id), m].sort((a, b) => a.startsAt - b.startsAt) }))
+  const replace = (m: Meeting) => { useStore.setState(s => ({ meetings: s.meetings.map(x => (x.occId ?? x.id) === (m.occId ?? m.id) ? m : x) })); if (m.recur && m.recur !== 'none') void useStore.getState().reloadMeetings() }
 
   // Saves a moved or resized meeting right away and puts it back if the server says no.
   async function commit(m: Meeting, s: number, e: number) {
@@ -97,7 +95,7 @@ export function Calendar({ onNew, onOpen, onEdit }: { onNew: (start?: number, en
   function beginDrag(ev: React.PointerEvent, m: Meeting, mode: 'move' | 'resize') {
     if (ev.button !== 0) return
     ev.stopPropagation()
-    const canMove = m.organizer.id === me.id && ev.pointerType !== 'touch'
+    const canMove = m.organizer.id === me.id && ev.pointerType !== 'touch' && (!m.recur || m.recur === 'none')
     const x0 = ev.clientX, y0 = ev.clientY
     const rects = cols.current.map(c => c?.getBoundingClientRect())
     const col0 = rects.findIndex(r => r && x0 >= r.left && x0 < r.right)
@@ -119,7 +117,7 @@ export function Calendar({ onNew, onOpen, onEdit }: { onNew: (start?: number, en
         const s = m.startsAt + dMs + shift
         cur = { s, e: s + (m.endsAt - m.startsAt) }
       }
-      setDrag({ id: m.id, s: cur.s, e: cur.e })
+      setDrag({ id: m.occId ?? m.id, s: cur.s, e: cur.e })
     }
     const finish = (cancel: boolean) => {
       window.removeEventListener('pointermove', move)
@@ -180,7 +178,7 @@ export function Calendar({ onNew, onOpen, onEdit }: { onNew: (start?: number, en
     ev.stopPropagation()
     const mine = m.attendees.find(a => a.user.id === me.id)
     const organizer = m.organizer.id === me.id
-    const respond = (r: string) => api.respondMeeting(m.id, r).then(replace).catch(e => toast(e.message, 'error'))
+    const respond = (r: string) => api.respondMeeting(m.id, r).then(() => useStore.getState().reloadMeetings()).catch(e => toast(e.message, 'error'))
     const items: CtxItem[] = [
       { label: 'Open', icon: <ExternalLink size={15} />, onClick: () => onOpen(m) },
       { label: 'Join', icon: <Video size={15} />, onClick: () => joinCall(m.id, m.title) }
@@ -189,9 +187,9 @@ export function Calendar({ onNew, onOpen, onEdit }: { onNew: (start?: number, en
       items.push(
         { label: 'Edit', icon: <Pencil size={15} />, onClick: () => onEdit(m) },
         { label: '', onClick: () => {}, divider: true },
-        { label: 'Cancel meeting', icon: <Trash2 size={15} />, danger: true, onClick: async () => {
+        { label: m.recur && m.recur !== 'none' ? 'Cancel the whole series' : 'Cancel meeting', icon: <Trash2 size={15} />, danger: true, onClick: async () => {
           if (await askConfirm({ title: 'Cancel this meeting?', message: "It will be removed from everyone's calendar.", confirmLabel: 'Cancel meeting', danger: true })) {
-            api.deleteMeeting(m.id).then(() => useStore.setState(s => ({ meetings: s.meetings.filter(x => x.id !== m.id) }))).catch(e => toast(e.message, 'error'))
+            api.deleteMeeting(m.id).then(() => useStore.getState().reloadMeetings()).catch(e => toast(e.message, 'error'))
           }
         } }
       )
@@ -237,7 +235,7 @@ export function Calendar({ onNew, onOpen, onEdit }: { onNew: (start?: number, en
           const isToday = new Date(d).toDateString() === new Date(now).toDateString()
           const boxes = todays.map(m => {
             const top = ((Math.max(m.startsAt, d) - d) / 3_600_000) * HOUR
-            return { id: m.id, top, bottom: top + Math.max(22, ((Math.min(m.endsAt, dayEnd) - Math.max(m.startsAt, d)) / 3_600_000) * HOUR - 2) }
+            return { id: m.occId ?? m.id, top, bottom: top + Math.max(22, ((Math.min(m.endsAt, dayEnd) - Math.max(m.startsAt, d)) / 3_600_000) * HOUR - 2) }
           })
           const lanes = layoutDay(boxes)
           return (
@@ -261,19 +259,19 @@ export function Calendar({ onNew, onOpen, onEdit }: { onNew: (start?: number, en
                 const s = Math.max(m.startsAt, d), e = Math.min(m.endsAt, dayEnd)
                 const top = ((s - d) / 3_600_000) * HOUR
                 const height = Math.max(22, ((e - s) / 3_600_000) * HOUR - 2)
-                const { lane, lanes: count } = lanes.get(m.id)!
+                const { lane, lanes: count } = lanes.get(m.occId ?? m.id)!
                 const declined = m.attendees.find(a => a.user.id === me.id)?.response === 'declined'
                 const organizer = m.organizer.id === me.id
-                const dragging = drag?.id === m.id
+                const dragging = drag?.id === (m.occId ?? m.id)
                 return (
-                  <div key={m.id} role="button" tabIndex={0}
+                  <div key={m.occId ?? m.id} role="button" tabIndex={0}
                     className={`cal-event${declined ? ' declined' : ''}${organizer ? ' own' : ''}${dragging ? ' dragging' : ''}`}
                     style={{ top, height, left: `calc(${(lane / count) * 100}% + 3px)`, right: 'auto', width: `calc(${100 / count}% - 6px)` }}
                     onPointerDown={e => beginDrag(e, m, 'move')}
                     onContextMenu={e => eventMenu(e, m)}
                     onKeyDown={e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); onOpen(m) } }}
                     title={`${m.title}\n${formatTime(m.startsAt)} – ${formatTime(m.endsAt)}`}>
-                    <b className="cal-title">{m.title}</b>
+                    <b className="cal-title">{m.title}{m.recur && m.recur !== 'none' && <Repeat size={11} style={{ marginLeft: 4, verticalAlign: -1 }} aria-label="Repeats" />}</b>
                     {(height > 38 || dragging) && <span className="muted">{formatTime(m.startsAt)} – {formatTime(m.endsAt)}</span>}
                     {organizer && <i className="cal-resize" onPointerDown={e => beginDrag(e, m, 'resize')} aria-hidden />}
                   </div>

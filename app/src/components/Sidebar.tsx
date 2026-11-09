@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { AtSign, Bookmark, ChevronDown, ChevronRight, Hash, Lock, MessageSquareReply, Pencil, Plus, SmilePlus, Star, Users, Video } from 'lucide-react'
+import { AtSign, Bookmark, CalendarClock, ChevronDown, ChevronRight, Hash, Lock, MessageSquareReply, Pencil, Plus, SmilePlus, Star, Users, Video } from 'lucide-react'
 import { api } from '../lib/api'
 import { formatShort, plainText } from '../lib/format'
 import { chatTitle, useStore } from '../lib/store'
@@ -104,7 +104,7 @@ export function ChatNav({ onNewChat, onNewTeam, onNewChannel, onManage }: {
     </NavRow>
   )
 
-  const quick = (id: 'mentions' | 'drafts' | 'saved', label: string, icon: React.ReactNode, count: number) => (
+  const quick = (id: 'mentions' | 'drafts' | 'saved' | 'scheduled', label: string, icon: React.ReactNode, count: number) => (
     <NavRow key={id} active={quickView === id} unread={id === 'mentions' && count > 0} onClick={() => setQuick(quickView === id ? null : id)}>
       <span className="quick-ico">{icon}</span>
       <div className="grow title">{label}</div>
@@ -125,6 +125,7 @@ export function ChatNav({ onNewChat, onNewTeam, onNewChannel, onManage }: {
             {quick('mentions', 'Mentions', <AtSign size={17} />, mentionCount)}
             {quick('drafts', 'Drafts', <Pencil size={16} />, draftCount)}
             {quick('saved', 'Saved', <Bookmark size={16} />, 0)}
+            {quick('scheduled', 'Scheduled', <CalendarClock size={16} />, 0)}
           </>
         )}
 
@@ -244,7 +245,7 @@ export function CalendarSidebar({ onNew, onOpen }: { onNew: () => void; onOpen: 
       <div className="sidebar-scroll">
         <div className="section-label">Upcoming</div>
         {upcoming.map(m => (
-          <button key={m.id} className="row" onClick={() => onOpen(m)}>
+          <button key={m.occId ?? m.id} className="row" onClick={() => onOpen(m)}>
             <Video size={16} />
             <div className="grow">
               <div className="title">{m.title}</div>

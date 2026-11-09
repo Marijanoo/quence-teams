@@ -1,10 +1,11 @@
 import { useEffect, useState, type MutableRefObject } from 'react'
-import { BarChart3, Check, Bookmark, BookmarkCheck, CornerUpLeft, FileText, MoreHorizontal, Pencil, Pin, PinOff, Smile, SmilePlus, Trash2, Video, MessageSquareReply, Paperclip } from 'lucide-react'
+import { AlarmClock, BarChart3, Check, ExternalLink, Bookmark, BookmarkCheck, CornerUpLeft, FileText, MoreHorizontal, Pencil, Pin, PinOff, Smile, SmilePlus, Trash2, Video, MessageSquareReply, Paperclip } from 'lucide-react'
 import { api, fileUrl } from '../lib/api'
-import { EMOJIS, QUICK_REACTIONS, emojiOnlyCount, formatBytes, formatTime, mentionsToDisplay, mentionsToRaw, plainText, renderBody } from '../lib/format'
+import { QUICK_REACTIONS, emojiOnlyCount, firstUrl, laterTimes, formatBytes, formatTime, mentionsToDisplay, mentionsToRaw, plainText, renderBody } from '../lib/format'
 import { useSettings } from '../lib/settings'
 import { askConfirm, convoName, useStore } from '../lib/store'
-import type { Message, Poll } from '../lib/types'
+import type { EditVersion, LinkCard, Message, Poll } from '../lib/types'
+import { Emoji, EmojiGrid, EmojiManager } from './CustomEmoji'
 import { Avatar, useClickOutside, useKeepInViewport } from './ui'
 
 
@@ -17,11 +18,70 @@ function ReactionPicker({ onPick, onClose, align = 'left' }: { onPick: (e: strin
     <div ref={el => { (outside as MutableRefObject<HTMLDivElement | null>).current = el; (fit as MutableRefObject<HTMLDivElement | null>).current = el }}
       className="popup react-pop" style={{ [align]: 0, top: '100%', marginTop: 4, padding: 4 }}>
       {more
-        ? <div className="emoji-grid">{EMOJIS.map(e => <button key={e} onClick={() => { onPick(e); onClose() }} aria-label={`React ${e}`}>{e}</button>)}</div>
+        ? <EmojiGrid onPick={e => { onPick(e); onClose() }} />
         : <div className="quick" style={{ display: 'flex' }}>
             {QUICK_REACTIONS.map(e => <button key={e} onClick={() => { onPick(e); onClose() }} aria-label={`React ${e}`}>{e}</button>)}
             <button onClick={() => setMore(true)} aria-label="More reactions" title="More" style={{ fontSize: 14 }}>•••</button>
           </div>}
+    </div>
+  )
+}
+
+// A card for the first link in a message. Fetched by the server (never by this device), cached per address.
+const cards = new Map<string, Promise<LinkCard | null>>()
+function LinkPreview({ url }: { url: string }) {
+  const [card, setCard] = useState<LinkCard | null>(null)
+  useEffect(() => {
+    let alive = true
+    if (!cards.has(url)) cards.set(url, api.preview(url).catch(() => null))
+    cards.get(url)!.then(c => { if (alive) setCard(c) })
+    return () => { alive = false }
+  }, [url])
+  if (!card) return null
+  return (
+    <a className="link-card" href={card.url} target="_blank" rel="noopener noreferrer">
+      <div className="site">{card.site}<ExternalLink size={11} /></div>
+      <div className="title">{card.title}</div>
+      {card.description && <div className="desc">{card.description}</div>}
+    </a>
+  )
+}
+
+// "(edited)" opens the earlier versions of the message.
+function EditHistory({ msg }: { msg: Message }) {
+  const [open, setOpen] = useState(false)
+  const [versions, setVersions] = useState<EditVersion[] | null>(null)
+  const ref = useClickOutside<HTMLDivElement>(() => setOpen(false), open)
+  const fit = useKeepInViewport<HTMLDivElement>(open)
+  const users = useStore(s => s.users)
+  useEffect(() => { if (open) api.history(msg.id).then(setVersions).catch(() => setVersions([])) }, [open, msg.id, msg.editedAt])
+  return (
+    <div ref={ref} style={{ position: 'relative', display: 'inline-block' }}>
+      <button className="edited linkish" onClick={() => setOpen(o => !o)} title="See earlier versions">(edited)</button>
+      {open && (
+        <div ref={fit} className="menu history-pop" style={{ top: '100%', left: 0, marginTop: 4 }}>
+          {versions === null ? <div className="muted" style={{ padding: 8 }}>Loading…</div> : [...versions].reverse().map((v, i) => (
+            <div key={v.at} className="history-row">
+              <div className="muted" style={{ fontSize: 11.5 }}>{i === 0 ? 'Current' : 'Earlier'} · {formatTime(v.at)}</div>
+              <div>{plainText(v.body, users)}</div>
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  )
+}
+
+function RemindMenu({ msgId, onClose, mine }: { msgId: string; onClose: () => void; mine: boolean }) {
+  const ref = useClickOutside<HTMLDivElement>(onClose)
+  const fit = useKeepInViewport<HTMLDivElement>()
+  const toast = useStore(s => s.toast)
+  return (
+    <div ref={el => { (ref as MutableRefObject<HTMLDivElement | null>).current = el; (fit as MutableRefObject<HTMLDivElement | null>).current = el }}
+      className="menu" style={{ top: '100%', [mine ? 'right' : 'left']: 0, marginTop: 4 }} role="menu">
+      {laterTimes().map(r => (
+        <button key={r.label} onClick={async () => { onClose(); try { await api.remind({ messageId: msgId, remindAt: r.at }); toast(`I will remind you ${r.label.toLowerCase()}`, 'info') } catch (e) { toast((e as Error).message, 'error') } }}>{r.label}</button>
+      ))}
     </div>
   )
 }
@@ -86,6 +146,9 @@ export function MessageItem({ msg, compact, inThread, canModerate, onReply, onQu
   const [editing, setEditing] = useState(false)
   const [draft, setDraft] = useState('')
   const [picker, setPicker] = useState(false)
+  const [remindOpen, setRemindOpen] = useState(false)
+  const [manage, setManage] = useState(false)
+  useStore(s => s.customEmoji) // re-render when the emoji list loads
 
   const mine = msg.author?.id === me.id
   const run = (p: Promise<unknown>) => p.catch(e => toast((e as Error).message, 'error'))
@@ -142,13 +205,14 @@ export function MessageItem({ msg, compact, inThread, canModerate, onReply, onQu
 
   return (
     <div className={cls + (pending ? ' pending' : '')} data-id={msg.id} onClick={onTap}>
+      {manage && <EmojiManager onClose={() => setManage(false)} />}
       {!mine && <div className="avatar-slot"><Avatar user={msg.author} size={36} presence /></div>}
       <div className="msg-col">
         {!compact && (
           <div className="meta">
             {!mine && <span className="author">{msg.author?.name ?? 'Unknown'}</span>}
             <span className="stamp">{formatTime(msg.createdAt)}</span>
-            {msg.editedAt && <span className="edited">(edited)</span>}
+            {msg.editedAt && <EditHistory msg={msg} />}
             {saved && <BookmarkCheck size={12} color="var(--accent)" aria-label="Saved" />}
           </div>
         )}
@@ -179,10 +243,14 @@ export function MessageItem({ msg, compact, inThread, canModerate, onReply, onQu
               ) : msg.poll ? <PollBlock msg={msg} poll={msg.poll} meId={me.id} />
                 : msg.body && <div className="text">{renderBody(msg.body, users, me.id)}</div>}
 
+              {!editing && cfg.linkPreviews && !msg.poll && msg.kind === 'text' && !pending && (() => { const u = firstUrl(msg.body); return u ? <LinkPreview url={u} /> : null })()}
+
               {msg.attachments.length > 0 && (
                 <div className="attachments">
                   {msg.attachments.map(a => /^image\/(png|jpe?g|gif|webp)$/.test(a.mime)
                     ? <img key={a.id} className="attach-img" src={fileUrl(a.id)} alt={a.name} onClick={() => onImage?.(fileUrl(a.id))} />
+                    : /^audio\/(webm|ogg|mpeg|wav)/.test(a.mime)
+                    ? <audio key={a.id} className="attach-audio" controls preload="none" src={fileUrl(a.id)} aria-label={a.name} />
                     : <a key={a.id} className="attach-file" href={fileUrl(a.id, true)} download={a.name}>
                         <FileText size={20} /><div style={{ minWidth: 0 }}><div className="name">{a.name}</div><div className="muted" style={{ fontSize: 12 }}>{formatBytes(a.size)}</div></div>
                       </a>)}
@@ -197,7 +265,7 @@ export function MessageItem({ msg, compact, inThread, canModerate, onReply, onQu
                   return (
                     <button key={r.emoji} className={`reaction${has ? ' mine' : ''}`} onClick={() => run(api.react(msg.id, r.emoji, !has))}
                       title={r.userIds.map(id => users[id]?.name ?? 'someone').join(', ')}>
-                      <span className="emo">{r.emoji}</span><span className="cnt">{r.userIds.length}</span>
+                      <span className="emo"><Emoji value={r.emoji} /></span><span className="cnt">{r.userIds.length}</span>
                     </button>
                   )
                 })}
@@ -220,6 +288,7 @@ export function MessageItem({ msg, compact, inThread, canModerate, onReply, onQu
                       {canReply && msg.kind === 'text' && item(<CornerUpLeft size={15} />, 'Reply', doReply)}
                       {item(<Smile size={15} />, 'More reactions', () => setGrid(true))}
                       {mine && msg.kind === 'text' && item(<Pencil size={15} />, 'Edit', () => { setDraft(mentionsToDisplay(msg.body, users)); setEditing(true) })}
+                      {item(<AlarmClock size={15} />, 'Remind me…', () => setRemindOpen(true))}
                       {item(saved ? <BookmarkCheck size={15} /> : <Bookmark size={15} />, saved ? 'Remove from saved' : 'Save this message', () => void toggleSaved(msg.id))}
                       {!inThread && item(msg.pinned ? <PinOff size={15} /> : <Pin size={15} />, msg.pinned ? 'Unpin' : 'Pin', () => run(api.pin(msg.id, !msg.pinned)))}
                       {(mine || canModerate) && <hr />}
@@ -229,6 +298,7 @@ export function MessageItem({ msg, compact, inThread, canModerate, onReply, onQu
                     </div>
                   )}
                   {grid && <ReactionPicker onPick={react} onClose={() => setGrid(false)} align={mine ? 'right' : 'left'} />}
+                  {remindOpen && <RemindMenu msgId={msg.id} onClose={() => setRemindOpen(false)} mine={mine} />}
                 </div>
               </div>
             )}
