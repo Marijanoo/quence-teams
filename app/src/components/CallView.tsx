@@ -1,10 +1,11 @@
 import { useEffect, useRef, useState } from 'react'
 import { audioConstraints, getSettings, useSettings } from '../lib/settings'
-import { Camera, CameraOff, Hand, MessageSquare, Mic, MicOff, MonitorUp, PhoneOff, Smile, Sparkles, Users } from 'lucide-react'
-import { api } from '../lib/api'
+import { Camera, CameraOff, Hand, Link2, MessageSquare, Mic, MicOff, MonitorUp, PhoneOff, Smile, Sparkles, UserX, Users } from 'lucide-react'
+import { api, getServer } from '../lib/api'
 import { CallSession, type Participant } from '../lib/call'
 import { useStore } from '../lib/store'
 import { Avatar } from './ui'
+import { socket } from '../lib/socket'
 import { Emoji } from './CustomEmoji'
 
 function VideoTile({ stream, muted, mirror, screen }: { stream: MediaStream | null; muted?: boolean; mirror?: boolean; screen?: boolean }) {
@@ -49,8 +50,11 @@ function useSpeaking(stream: MediaStream | null) {
   return speaking
 }
 
-function PersonTile({ userId, stream, muted, label, mirror, status, hand }: { userId: string; stream: MediaStream | null; muted?: boolean; label?: string; mirror?: boolean; status?: string; hand?: boolean }) {
-  const user = useStore(s => s.users[userId])
+function PersonTile({ userId, stream, muted, label, mirror, status, hand, room }: { userId: string; stream: MediaStream | null; muted?: boolean; label?: string; mirror?: boolean; status?: string; hand?: boolean; room?: string }) {
+  const account = useStore(s => s.users[userId])
+  const guestName = useStore(s => s.callNames[userId])
+  const isGuest = userId.startsWith('guest:')
+  const user = account ?? (isGuest ? { id: userId, name: guestName ?? 'Guest', email: '', title: '', statusMsg: '', color: 5, avatar: 0 } : undefined)
   const speaking = useSpeaking(muted ? null : stream)
   const showVideo = hasLiveVideo(stream)
   return (
@@ -58,7 +62,8 @@ function PersonTile({ userId, stream, muted, label, mirror, status, hand }: { us
       <VideoTile stream={stream} muted={muted} mirror={mirror} />
       {!showVideo && <Avatar user={user} size={84} />}
       {hand && <div className="hand-badge" title="Hand raised" aria-label="Hand raised">✋</div>}
-      <div className="label">{label ?? user?.name ?? 'Guest'}{status && <span className="muted"> · {status}</span>}</div>
+      {isGuest && room && <button className="icon-btn tile-x" title="Remove this guest" aria-label="Remove this guest" onClick={() => socket.send('call.remove', { room, guestId: userId })}><UserX size={15} /></button>}
+      <div className="label">{label ?? user?.name ?? 'Guest'}{isGuest && <span className="muted"> · guest</span>}{status && <span className="muted"> · {status}</span>}</div>
     </div>
   )
 }
@@ -87,6 +92,8 @@ export function CallView() {
   const chatOpenRef = useRef(false)
   chatOpenRef.current = chatOpen
   const users = useStore(s => s.users)
+  const callNames = useStore(s => s.callNames)
+  const lobby = useStore(s => s.lobby.filter(l => l.room === s.activeCall?.room))
   const isConvo = useStore(s => s.chats.some(c => c.id === call.room) || s.teams.some(t => t.channels.some(c => c.id === call.room)))
 
   useEffect(() => {
@@ -125,7 +132,7 @@ export function CallView() {
   const shared = session.screenPreview
   if (shared) tiles.push({ key: 'my-screen', node: <div className="tile screen"><VideoTile stream={shared} muted screen /><div className="label">Your screen</div></div> })
   for (const p of parts) {
-    tiles.push({ key: p.userId, node: <PersonTile userId={p.userId} stream={p.stream} status={connectionStatus(p.connection)} hand={session.hands.has(p.userId)} /> })
+    tiles.push({ key: p.userId, node: <PersonTile userId={p.userId} stream={p.stream} status={connectionStatus(p.connection)} hand={session.hands.has(p.userId)} room={call.room} /> })
     if (p.screen) tiles.push({ key: p.userId + '-screen', node: <div className="tile screen"><VideoTile stream={p.screen} screen /><div className="label">Screen</div></div> })
   }
   const cols = tiles.length <= 1 ? 1 : tiles.length <= 4 ? 2 : 3
@@ -134,10 +141,31 @@ export function CallView() {
     <div className="call" role="dialog" aria-label="Call">
       <div className="call-top">
         <b>{call.title}</b>
-        <span className="muted" style={{ display: 'flex', gap: 6, alignItems: 'center' }}><Users size={15} /> {parts.length + 1}</span>
+        <span style={{ display: "flex", gap: 10, alignItems: "center" }}>
+          <button className="btn sm" onClick={async () => {
+            try {
+              const l = await api.createGuestLink(call.room)
+              const url = (getServer() || location.origin) + l.path
+              await navigator.clipboard?.writeText(url).catch(() => {})
+              toast('Guest link copied. It works for 24 hours, and you let each guest in yourself.', 'info')
+            } catch (e) { toast((e as Error).message, 'error') }
+          }}><Link2 size={14} /> Invite a guest</button>
+          <span style={{ display: 'flex', gap: 6, alignItems: 'center' }}><Users size={15} /> {parts.length + 1}</span>
+        </span>
       </div>
+      {lobby.length > 0 && (
+        <div className="lobby" role="alert">
+          {lobby.map(l => (
+            <div key={l.guest.id} className="lobby-row">
+              <span><b>{l.guest.name}</b> wants to join</span>
+              <button className="btn sm" onClick={() => socket.send('call.admit', { room: call.room, guestId: l.guest.id, allow: false })}>Deny</button>
+              <button className="btn primary sm" onClick={() => socket.send('call.admit', { room: call.room, guestId: l.guest.id, allow: true })}>Let in</button>
+            </div>
+          ))}
+        </div>
+      )}
  <div className="call-reactions" aria-hidden>
-        {session.reactions.map(r => <span key={r.id} className="call-react" style={{ left: `${10 + (r.id * 37) % 80}%` }}><Emoji value={r.emoji} /><small>{r.userId === me.id ? 'You' : users[r.userId]?.name.split(' ')[0]}</small></span>)}
+        {session.reactions.map(r => <span key={r.id} className="call-react" style={{ left: `${10 + (r.id * 37) % 80}%` }}><Emoji value={r.emoji} /><small>{r.userId === me.id ? 'You' : (users[r.userId]?.name ?? callNames[r.userId] ?? '').split(' ')[0]}</small></span>)}
       </div>
       <div className="call-body">
       <div className="call-grid" style={{ gridTemplateColumns: `repeat(${cols}, minmax(0, 1fr))` }}>
@@ -149,7 +177,7 @@ export function CallView() {
         <aside className="call-chat" aria-label="Call chat">
           <div className="call-chat-lines">
             {session.chat.length === 0 && <div className="muted" style={{ padding: 8 }}>{isConvo ? 'Messages here are also posted in the conversation.' : 'Messages here disappear when the call ends.'}</div>}
-            {session.chat.map((l, i) => <div key={i} className="call-chat-line"><b>{l.userId === me.id ? 'You' : users[l.userId]?.name ?? 'Someone'}</b> {l.text}</div>)}
+            {session.chat.map((l, i) => <div key={i} className="call-chat-line"><b>{l.userId === me.id ? 'You' : users[l.userId]?.name ?? callNames[l.userId] ?? 'Someone'}</b> {l.text}</div>)}
           </div>
           <form onSubmit={e => {
             e.preventDefault()

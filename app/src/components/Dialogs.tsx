@@ -355,6 +355,13 @@ export function MeetingDialog({ meeting, onClose, onEdit }: { meeting: Meeting; 
             <button className="btn" onClick={() => respond('accepted')}>Accept</button>
           </>
         )}
+        <button className="btn" onClick={async () => {
+          try {
+            const l = await api.createGuestLink(meeting.id, 24 * 7)
+            await navigator.clipboard?.writeText((getServer() || location.origin) + l.path).catch(() => {})
+            toast('Guest link copied. It works for 7 days, and you let each guest in yourself.', 'info')
+          } catch (e) { toast((e as Error).message, 'error') }
+        }}>Copy guest link</button>
         <button className="btn primary" onClick={() => { onClose(); joinCall(meeting.id, meeting.title) }}>Join</button>
       </div>
     </Dialog>

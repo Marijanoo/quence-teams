@@ -21,6 +21,8 @@ interface State {
   activityUnseen: number
   meetings: Meeting[]
   calRange: { from: number; to: number } | null
+  lobby: { room: string; guest: { id: string; name: string }; title: string }[]
+  callNames: Record<string, string>
   callHistory: CallLog[]
   favorites: string[]
   savedIds: string[]
@@ -128,7 +130,7 @@ function bump(s: State, msg: Message, mine: boolean): Partial<State> {
 }
 
 export const useStore = create<State>((set, get) => ({
-  me: null, presencePref: 'available', users: {}, presence: {}, teams: [], chats: [], activityUnseen: 0, meetings: [], calRange: null, callHistory: [], favorites: [], savedIds: [], muted: [], customEmoji: [], drafts: {}, quickView: null,
+  me: null, presencePref: 'available', users: {}, presence: {}, teams: [], chats: [], activityUnseen: 0, meetings: [], calRange: null, lobby: [], callNames: {}, callHistory: [], favorites: [], savedIds: [], muted: [], customEmoji: [], drafts: {}, quickView: null,
   ready: false, online: false,
   view: 'chat', selection: null, threadId: null, jumpTo: null, convos: {}, threads: {}, typing: {},
   calls: {}, incoming: null, activeCall: null, toasts: [], confirmState: null, appearanceOpen: false, settingsSection: null,
@@ -316,7 +318,7 @@ export const useStore = create<State>((set, get) => ({
   dismissToast(id) { set(s => ({ toasts: s.toasts.filter(t => t.id !== id) })) },
 
   joinCall(room, title) { set({ activeCall: { room, title }, incoming: null }) },
-  leaveCall() { set({ activeCall: null }) },
+  leaveCall() { set({ activeCall: null, lobby: [] }) },
   dismissIncoming() { set({ incoming: null }) }
 }))
 
@@ -341,6 +343,15 @@ function wireSocket() {
   socket.on('hello', d => set({ presence: d.presence, calls: d.calls }))
   socket.on('presence', d => set(s => ({ presence: { ...s.presence, [d.userId]: d.presence } })))
   socket.on('user.updated', u => set(s => ({ users: { ...s.users, [u.id]: u }, me: s.me?.id === u.id ? u : s.me })))
+  // People with a guest link wait in a lobby until someone in the call lets them in.
+  socket.on('call.lobby', (d: { room: string; guest: { id: string; name: string }; title: string }) => {
+    if (get().lobby.some(l => l.guest.id === d.guest.id)) return
+    set(st => ({ lobby: [...st.lobby, d] }))
+    if (get().activeCall?.room !== d.room) get().toast(`${d.guest.name} is waiting to join ${d.title || 'your call'}. Join the call to let them in.`, 'info')
+    else if (getSettings().soundCall) beep('message')
+  })
+  socket.on('call.lobby.resolved', (d: { guestId: string }) => set(st => ({ lobby: st.lobby.filter(l => l.guest.id !== d.guestId) })))
+  socket.on('call.names', (d: { names: Record<string, string> }) => set(st => ({ callNames: { ...st.callNames, ...d.names } })))
   socket.on('emoji.updated', () => { void get().loadEmoji() })
   socket.on('reminder', (r: Reminder & { message: Message | null }) => {
     get().toast(`Reminder: ${r.text || plainBody(r.message, get().users) || 'a message you saved'}`, 'info')
