@@ -12,6 +12,8 @@ import { Avatar, useClickOutside } from './ui'
 import { PollDialog } from './PollDialog'
 
 const MAX_FILE = 25 * 1024 * 1024
+// GIF sending is built (server needs GIPHY_API_KEY) but switched off for now.
+const GIFS_ENABLED = false
 
 // Typed commands. The text after the command is passed on as the argument.
 const COMMANDS = [
@@ -281,10 +283,10 @@ function ComposerInner({ convoId, parentId, placeholder, allowSubject, onSent, m
               </div>
             )}
           </div>
-          <div ref={gifRef} style={{ position: 'relative' }}>
+          {GIFS_ENABLED && <div ref={gifRef} style={{ position: 'relative' }}>
             <button className={`icon-btn gif-btn${gif ? ' active' : ''}`} title="Send a GIF" aria-label="Send a GIF" onClick={() => setGif(g => !g)}>GIF</button>
             {gif && <div className="popup" style={{ bottom: '100%', left: 0, marginBottom: 6 }}><GifPicker onPick={g => void sendGif(g)} /></div>}
-          </div>
+          </div>}
           <button className="icon-btn" title="Create a poll" onClick={() => setPoll({ question: '' })}><BarChart3 size={17} /></button>
           <button className="icon-btn" title="Attach files" onClick={() => fileInput.current?.click()}><Paperclip size={17} /></button>
           {rec
